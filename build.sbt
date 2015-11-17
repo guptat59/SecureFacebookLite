@@ -16,7 +16,7 @@ libraryDependencies ++= Seq(
   "io.spray" %% "spray-client" % sprayVersion,
   "io.spray" %% "spray-can" % sprayVersion,
   "io.spray" %% "spray-json" % "1.3.1",
-  "io.spray" %% "spray-testkit" % sprayVersion % "test",
+  "io.spray" %% "spray-testkit" % sprayVersion % "test",  
   "org.json4s" %% "json4s-native" % "3.2.10",
   "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
   "ch.qos.logback" % "logback-classic" % "1.1.2",
