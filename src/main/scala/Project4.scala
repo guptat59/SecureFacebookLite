@@ -40,12 +40,12 @@ object FacebookServer extends App with SimpleRoutingApp {
   userlist.put("1", user);
   user.createUser(22, "ab", "dv", "male")
   //creating bulk users
-  for(i <- 0 to 100)
+  /*for(i <- 0 to 100)
   {
      var user = new FBUser(i.toString());
     userlist.put(i.toString(), user);
     user.createUser(i, "a"+i, "b"+i, "male")
-  }
+  }*/
   var list1 = new java.util.ArrayList[String]()
   user.addPosts("hi")
   user.addPosts("hello")
@@ -103,7 +103,8 @@ object FacebookServer extends App with SimpleRoutingApp {
       get {
         path("user" / IntNumber / "home") { userId =>
           complete {
-            implicit val timeout = Timeout(5)
+            //val future = user.getProfile()
+            implicit val timeout = Timeout(100)
             val future = Await.result(Patterns.ask(FBApi, getUserPage(userId.toString()), timeout),timeout.duration).asInstanceOf[String]
             future
           }
@@ -130,7 +131,7 @@ object FacebookServer extends App with SimpleRoutingApp {
       get {
         path("profile" / IntNumber) { userId =>
           complete {
-            implicit val timeout = Timeout(5)
+            implicit val timeout = Timeout(30)
             val future = Await.result(Patterns.ask(FBApi, getUserProfile(userId.toString()), timeout),timeout.duration).asInstanceOf[String]
             future
           }
@@ -290,10 +291,19 @@ object FacebookServer extends App with SimpleRoutingApp {
       }
       case gp: getUserPage => {
        var user = FacebookServer.userlist.get(gp.username)
+       
+      
+      // println(user.getPosts())
        sender ! user.getPosts()
+       
       }
       case gpr: getUserProfile => {
        var user = FacebookServer.userlist.get(gpr.username)
+        for(i <- 1 to 10)
+       {
+         println("qwerty"+ i)
+         Thread.sleep(1000)
+       }
        sender ! user.getProfile()
       }
       case gfl: getFriendsList => {
