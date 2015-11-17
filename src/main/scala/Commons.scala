@@ -22,8 +22,8 @@ object UserLoginJsonSupport extends DefaultJsonProtocol with SprayJsonSupport {
 case class User(userId: String, firstName: String, lastName: String, age: Int, gender: String)
 case class NewUsersReq(count: Int, prefix: String, suffixLength: Int)
 case class NewUsersRes(userIds: Array[String])
-case class Post(message: String, link: String, place: String, privacy: String, object_attachment: String)
-case class UserPage(posts: Array[Post])
+case class post(message: String, link: String, place: String, privacy: String, object_attachment: String)
+case class UserPage(posts: Array[post])
 
 object jsonProtocol extends DefaultJsonProtocol with SprayJsonSupport {
   implicit val NewUsersReqFormat = jsonFormat3(NewUsersReq)
@@ -32,12 +32,12 @@ object jsonProtocol extends DefaultJsonProtocol with SprayJsonSupport {
     def write(f: NewUsersRes) = f.userIds.toJson
   }
   implicit val UserFormat = jsonFormat5(User)
-  implicit val postFormat = jsonFormat5(Post)
-  implicit object postList extends RootJsonFormat[UserPage] {
-    def read(value: JsValue) = UserPage(value.convertTo[Array[Post]])
+    implicit val postFormat = jsonFormat5(post)
+    implicit object postList extends RootJsonFormat[UserPage] {
+    def read(value: JsValue) = UserPage(value.convertTo[Array[post]])
     def write(f: UserPage) = f.posts.toJson
   }
-  implicit def userPageFormat[Post: JsonFormat] = jsonFormat1(UserPage.apply)
+  implicit def userPageFormat[post: JsonFormat] = jsonFormat1(UserPage.apply)
 }
 
 case class getUserProfile(userId: String)
