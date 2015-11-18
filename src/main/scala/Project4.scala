@@ -1,8 +1,6 @@
 import java.util.Hashtable
-
 import scala.concurrent.Await
 import scala.util.Random
-
 import akka.actor.Actor
 import akka.actor.ActorLogging
 import akka.actor.ActorSystem
@@ -19,6 +17,10 @@ import spray.httpx.marshalling.ToResponseMarshallable.isMarshallable
 import spray.routing.Directive.pimpApply
 import spray.routing.Route
 import spray.routing.SimpleRoutingApp
+import scala.collection.mutable.ListBuffer
+import java.util.UUID
+import scala.collection.parallel.mutable.ParHashMap
+import spray.httpx.marshalling.ToResponseMarshaller
 
 object FacebookServer extends App with SimpleRoutingApp {
 
@@ -39,12 +41,19 @@ object FacebookServer extends App with SimpleRoutingApp {
 
   startServer(interface = "localhost", port = 9443) {
     createProfiles ~
-      getProfiles
+      getProfiles ~
+      addPost ~
+      getPage
   }
 
   val nrOfInstances: Int = 4
 
   val FBServers = system.actorOf(SmallestMailboxPool(nrOfInstances).props(Props(new FBServer())), name = "FB_Servers")
+
+  def buildaddPost(userId: String, post: Post): addPost = {
+    var p = new addPost(UUID.randomUUID().toString(), userId, post)
+    p
+  }
 
   def get_JsonRes(route: Route) = get {
     respondWithMediaType(MediaTypes.`application/json`) { route }
@@ -58,8 +67,14 @@ object FacebookServer extends App with SimpleRoutingApp {
     post_JsonRes {
       path("createusers") {
         entity(as[NewUsersReq]) { newUsr =>
-          ctx => ctx.complete {
-            Await.result(FBServers ? newUsr, timeout.duration).asInstanceOf[NewUsersRes];
+          complete {
+            val f = Await.result(FBServers ? newUsr, timeout.duration);
+            if (f.isInstanceOf[NewUsersRes])
+              f.asInstanceOf[NewUsersRes]
+            else if (f.isInstanceOf[Error])
+              f.asInstanceOf[Error]
+            else
+              Error("Failed due to internal error2")
           }
         }
       }
@@ -70,20 +85,34 @@ object FacebookServer extends App with SimpleRoutingApp {
     get_JsonRes {
       path("profile" / "[a-zA-Z0-9]*".r) { userId =>
         complete {
-          println("getProfiles>>" + userId)
-          var v = getUserProfile(userId)
-          Await.result(FBServers ? v, timeout.duration).asInstanceOf[User];
+          val f = Await.result(FBServers ? findProfile(userId), timeout.duration)
+          if (f.isInstanceOf[User]) {
+            f.asInstanceOf[User]
+          } else if (f.isInstanceOf[Error]) {
+            f.asInstanceOf[Error]
+          } else {
+            Error("Failed due to internal error")
+          }
         }
       }
     }
   }
+
   lazy val addPost = {
-    get_JsonRes {
-      post {
-        path("user" / IntNumber / "feed") { userId =>
-          //Todo
-          //generate a UUID
-          ctx => ctx.complete("post UUID added to all users")
+    post_JsonRes {
+      path("user" / "[a-zA-Z0-9]*".r / "feed") { userId =>
+        //Verify the user. TODO        
+        entity(as[Post]) { postjson =>
+          complete {
+            val f = Await.result(FBServers ? buildaddPost(userId, postjson), timeout.duration)
+            if (f.isInstanceOf[PostAdded]) {
+              f.asInstanceOf[PostAdded]
+            } else if (f.isInstanceOf[Error]) {
+              f.asInstanceOf[Error]
+            } else {
+              Error("Failed due to internal error")
+            }
+          }
         }
       }
     }
@@ -91,12 +120,15 @@ object FacebookServer extends App with SimpleRoutingApp {
 
   lazy val getPage = {
     get_JsonRes {
-      get {
-        path("user" / IntNumber / "home") { userId =>
-          complete {
-            //val future = Await.result(Patterns.ask(FBApi, getUserPage(userId.toString()), timeout), timeout.duration).asInstanceOf[String]
-            //future
-            ""
+      path("user" / "[a-zA-Z0-9]*".r / "home") { userId =>
+        complete {
+          var f = Await.result(FBServers ? getUserPage(userId), timeout.duration)
+          if (f.isInstanceOf[UserPage]) {
+            f.asInstanceOf[UserPage]
+          } else if (f.isInstanceOf[Error]) {
+            f.asInstanceOf[Error]
+          } else {
+            Error("Failed due to internal error")
           }
         }
       }
@@ -174,7 +206,7 @@ object FacebookServer extends App with SimpleRoutingApp {
 
 class FBServer extends Actor with ActorLogging {
 
-  var userbase = new Hashtable[String, UserInfo]()
+  var userbase = new ParHashMap[String, UserInfo]()
 
   def receive = {
 
@@ -182,17 +214,49 @@ class FBServer extends Actor with ActorLogging {
       var newIds = populateUserBase(newUsr)
       sender ! newIds
     }
-    case gp: getUserPage => {
-      var user = userbase.get(gp.username)
-      sender ! user.getPosts()
-    }
-    case gpr: getUserProfile => {
+    case gpr: findProfile => {
       var user = userbase.get(gpr.userId)
-      sender ! user.getPublicProfile()
+      if (user.isEmpty) {
+        sender ! Error(Constants.messages.noUser)
+      } else {
+        sender ! user.get.getPublicProfile()
+      }
+    }
+    case ap: addPost => {
+      var user = userbase.get(ap.userId)
+      if (user.isEmpty) {
+        sender ! Error(Constants.messages.noUser)
+      } else {
+        //Can control this based on a private post or friends post.
+        ap.post.privacy match {
+          case Constants.privacy.personal => {
+            user.get.addToFeed(ap.postId, ap.post)
+          }
+          case Constants.privacy.friends =>
+            {
+              user.get.addToFeed(ap.postId, ap.post)
+              var it = user.get.getFriendList().iterator
+              while (it.hasNext) {
+                var friendId = it.next()
+                var friend = userbase.get(friendId)
+                friend.get.addToFeed(ap.postId, ap.post)
+              }
+            }
+            sender ! PostAdded(ap.postId, Constants.messages.success)
+        }
+      }
+    }
+    case gp: getUserPage => {
+      var user = userbase.get(gp.userId)
+      if (user.isEmpty) {
+        sender ! Error(Constants.messages.noUser)
+      } else {
+        sender ! user.get.getPosts()
+      }
     }
     case gfl: getFriendsList => {
-      var user = userbase.get(gfl.username)
-      sender ! user.getFriendList()
+      var user = userbase.get(gfl.userId)
+      //sender ! user.getFriendList()
     }
   }
 
@@ -202,7 +266,7 @@ class FBServer extends Actor with ActorLogging {
     for (i <- 0 until newUsr.count) {
       //Create user with given data.
       var userId = newUsr.prefix + userIdOffset
-      if (!userbase.containsKey(userId)) {
+      if (!userbase.contains(userId)) {
         var user = createUserWithID(userId)
         newIds = newIds :+ userId
         userbase.put(userId, user)
@@ -226,9 +290,21 @@ class FBServer extends Actor with ActorLogging {
 
 class UserInfo(val userid: String, var age: Int = -1, var firstName: String = "", var lastName: String = "", var gender: String = "NA") {
 
-  var posts = new java.util.ArrayList[String]()
+  /**
+   * Listbuffer internally uses list
+   * head - Constant time
+   * tail - Linear time
+   * apply - Linear time
+   * update - Linear time
+   * prepend - Constant time
+   * append - Constant time
+   * insert - Linear time
+   * toList - Constant time
+   */
+  var posts = new ListBuffer[Post]()
+
   var albumids = new java.util.ArrayList[String]()
-  var friendlist = new java.util.ArrayList[String]()
+  var friendList = new ListBuffer[String]()
   //var photoAlbum = new HashMap[String,photoids]()
 
   def insertData(a: Int, fn: String, ln: String, gen: String) {
@@ -238,23 +314,25 @@ class UserInfo(val userid: String, var age: Int = -1, var firstName: String = ""
     gender = gen
   }
 
-  def addPosts(post: String) {
-    posts.add(post)
+  def addToFeed(postId: String, post: Post) = {
+    posts.prepend(post)
   }
 
-  def getPosts(): String = {
-    posts.toString()
+  def getPosts(): UserPage = {
+    return UserPage(posts.toList.toArray)
   }
 
-  def getPublicProfile(): User =
-    {
-      User(userid, firstName, lastName, age, gender);
-    }
+  def addFriend(friendId: String) = {
+    friendList.append(friendId)
+  }
 
-  def getFriendList(): String =
-    {
-      friendlist.toString()
-    }
+  def getPublicProfile(): User = {
+    User(userid, firstName, lastName, age, gender);
+  }
+
+  def getFriendList(): ListBuffer[String] = {
+    friendList
+  }
 }
 
 class Images {
