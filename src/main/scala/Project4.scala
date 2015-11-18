@@ -39,7 +39,7 @@ object FacebookServer extends App with SimpleRoutingApp {
 
   import jsonProtocol._
 
-  startServer(interface = "localhost", port = 9443) {
+  startServer(interface = "localhost", port = 8080) {
     createProfiles ~
       getProfiles ~
       addPost ~
@@ -270,7 +270,7 @@ class FBServer extends Actor with ActorLogging {
         var user = createUserWithID(userId)
         newIds = newIds :+ userId
         userbase.put(userId, user)
-        userIdOffset += 1;
+        userIdOffset = 1;
         println("User Created : " + user.getPublicProfile())
       } else {
         //Should not happen

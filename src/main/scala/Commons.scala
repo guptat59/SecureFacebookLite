@@ -10,7 +10,7 @@ object Constants {
     val friends = "friends"
     val personal = "personal"
   }
-  
+
   object messages {
     val success = "Successfully completed"
     val noUser = "User does not exist!!"
@@ -35,7 +35,7 @@ case class User(userId: String, firstName: String, lastName: String, age: Int, g
 case class NewUsersReq(count: Int, prefix: String, suffixLength: Int)
 case class NewUsersRes(userIds: Array[String])
 case class Post(message: String, link: String, place: String, privacy: String, object_attachment: String)
-case class PostAdded( uuid: String , message: String)
+case class PostAdded(uuid: String, message: String)
 case class UserPage(posts: Array[Post])
 case class Error(reason: String)
 
@@ -53,7 +53,8 @@ object jsonProtocol extends DefaultJsonProtocol with SprayJsonSupport {
     def write(f: UserPage) = f.posts.toJson
   }
   implicit def userPageFormat[Post: JsonFormat] = jsonFormat1(UserPage.apply)
-  implicit val errorFormat = jsonFormat1(Error) 
+  implicit val errorFormat = jsonFormat1(Error)
+
 }
 
 case class findProfile(userId: String)
