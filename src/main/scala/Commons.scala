@@ -17,7 +17,11 @@ object Constants {
     val success = "Successfully completed"
     val noUser = "User does not exist!!"
     val noPermission = "You dont have permission to perform this operation"
-    val alreadyPresent = "Username already exists"
+    val userAlreadyPresent = "Username already exists"
+    val albumCreated = "Album successfully created."
+    val albumCreationFailed = "Album creation failed"
+    val photoAdded = "Successfully added the photo to user profile"
+    val photoAddFailed = "Photo addition to user album failed"
   }
 }
 
@@ -44,7 +48,7 @@ case class UserPost(message: String, link: Option[String] = None, place: Option[
 case class PostAdded(uuid: String, message: String)
 case class UserPage(posts: Array[UserPost])
 case class Album(userId: String, albumId: String, coverPhoto: Option[String] = None, createdTime: Option[String] = None, description: Option[String] = None, place: Option[String] = None, updateTime: Option[String] = None, var photos: Array[String])
-case class Photo(userId: String, albumId: String, photoId: String, src: String, message: Option[String] = None, place: Option[String] = None, noStory: Option[Boolean] = None)
+case class Photo(userId: String, albumId: String, photoId: String, src: String, message: Option[String] = None, place: Option[String] = None, noStory: Boolean = false)
 case class Success(reason: String)
 case class Error(reason: String)
 
@@ -77,6 +81,44 @@ case class requestFriend(userId: String, req: FriendReq)
 case class getUserPage(userId: String)
 case class getFriendsList(userId: String, frndId: String)
 case class getPhotos(userId: String)
-case class addPhoto(userId: String, albumId: String, photoId: String)
-case class getAlbums(userId: String)
-case class addAlbums(userId: String, albumId: String)
+case class getUserAlbums(userId: String)
+case class getUserAlbumInfo(userId: String, albumId: String)
+
+class PictureAlbum(val ownerId: String, val albumId: String) {
+
+  var coverPhoto: Option[String] = None
+  var createdTime: String
+  var description: Option[String] = None
+  var place: Option[String] = None
+  var updateTime: String
+  var photos: ListBuffer[String]
+
+  def populate(pcoverPhoto: Option[String] = None, pdescription: Option[String] = None, pplace: Option[String] = None) {
+    coverPhoto = pcoverPhoto
+    description = pdescription
+    place = pplace
+    createdTime = System.currentTimeMillis().toString()
+    updateTime = System.currentTimeMillis().toString()
+    photos = new ListBuffer[String]
+  }
+
+  def addPicture(pic: Picture) {
+    if (pic != null) {
+      photos.append(pic.photoId)
+    }
+  }
+
+}
+
+class Picture(val albumId: String, val photoId: String, val src: String) {
+
+  var message: Option[String] = None
+  var place: Option[String] = None
+  var nostory: Boolean = false
+
+  def populate(pmessage: Option[String] = None, pplace: Option[String] = None, pnostory: Boolean = false) {
+    nostory = pnostory
+    message = pmessage
+    place = pplace
+  }
+}
