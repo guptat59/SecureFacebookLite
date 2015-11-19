@@ -21,14 +21,21 @@ import scala.collection.mutable.ListBuffer
 import java.util.UUID
 import scala.collection.parallel.mutable.ParHashMap
 import spray.httpx.marshalling.ToResponseMarshaller
+import akka.routing.RoundRobinRouter
+import akka.routing.SmallestMailboxRouter
+import akka.routing.SmallestMailboxPool
+import java.util.HashMap
+import java.util.Arrays.ArrayList
 
 object FacebookServer extends App with SimpleRoutingApp {
 
   implicit val system = ActorSystem("FacebookServer")
-  implicit val timeout = Timeout(10000)
+  implicit val timeout = Timeout(1000000)
 
   val routes = createProfiles ~
+    createProfile ~
     addPost ~
+    addFriend ~
     getPage ~
     getFrndList ~
     getProfiles ~
@@ -41,16 +48,21 @@ object FacebookServer extends App with SimpleRoutingApp {
 
   startServer(interface = "localhost", port = 8080) {
     createProfiles ~
+    createProfile ~
       getProfiles ~
+      addFriend ~
+      getFrndList ~
       addPost ~
-      getPage
+      getPage ~
+      createAlbum ~
+      postPhoto
   }
 
   val nrOfInstances: Int = 4
 
   val FBServers = system.actorOf(SmallestMailboxPool(nrOfInstances).props(Props(new FBServer())), name = "FB_Servers")
-
-  def buildaddPost(userId: String, post: Post): addPost = {
+  //val FBServers = system.actorOf( Props(new FBServer()).withRouter(SmallestMailboxRouter(5)), name = "FB_Servers")
+  def buildaddPost(userId: String, post: UserPost): addPost = {
     var p = new addPost(UUID.randomUUID().toString(), userId, post)
     p
   }
@@ -80,7 +92,24 @@ object FacebookServer extends App with SimpleRoutingApp {
       }
     }
   }
-
+  
+  lazy val createProfile = {
+    post_JsonRes {
+      path("createuser") {
+        entity(as[NewUserReq]) { newUsr =>
+          complete {
+            val f = Await.result(FBServers ? newUsr, timeout.duration);
+            if (f.isInstanceOf[NewUsersRes])
+              f.asInstanceOf[NewUsersRes]
+            else if (f.isInstanceOf[Error])
+              f.asInstanceOf[Error]
+            else
+              Error("Failed due to internal error2")
+          }
+        }
+      }
+    }
+  }
   lazy val getProfiles = {
     get_JsonRes {
       path("profile" / "[a-zA-Z0-9]*".r) { userId =>
@@ -102,7 +131,7 @@ object FacebookServer extends App with SimpleRoutingApp {
     post_JsonRes {
       path("user" / "[a-zA-Z0-9]*".r / "feed") { userId =>
         //Verify the user. TODO        
-        entity(as[Post]) { postjson =>
+        entity(as[UserPost]) { postjson =>
           complete {
             val f = Await.result(FBServers ? buildaddPost(userId, postjson), timeout.duration)
             if (f.isInstanceOf[PostAdded]) {
@@ -135,13 +164,34 @@ object FacebookServer extends App with SimpleRoutingApp {
     }
   }
 
+  lazy val addFriend = {
+    post_JsonRes {
+      path("user" / "[a-zA-Z0-9]*".r / "addfriend") { userId =>
+        entity(as[FriendReq]) { frndreq =>
+          complete {
+            val f = Await.result(FBServers ? requestFriend(userId, frndreq), timeout.duration);
+            if (f.isInstanceOf[NewUsersRes])
+              f.asInstanceOf[NewUsersRes]
+            else if (f.isInstanceOf[Error])
+              f.asInstanceOf[Error]
+            else
+              Error("Failed due to internal error2")
+          }
+        }
+      }
+    }
+  }
   lazy val getFrndList = {
     get_JsonRes {
-      get {
-        path("friends" / IntNumber / "friendLists") { userId =>
-          ctx => ctx.complete {
-            //JSon array of user ids.
-            "list"
+      path("user" / "[a-zA-Z0-9]*".r / "friendslist" / "[a-zA-Z0-9]*".r) { (userId,frndId) =>
+        complete {
+          var f = Await.result(FBServers ? getFriendsList(userId,frndId), timeout.duration)
+          if (f.isInstanceOf[NewUsersRes]) {
+            f.asInstanceOf[NewUsersRes]
+          } else if (f.isInstanceOf[Error]) {
+            f.asInstanceOf[Error]
+          } else {
+            Error("Failed due to internal error")
           }
         }
       }
@@ -149,12 +199,19 @@ object FacebookServer extends App with SimpleRoutingApp {
   }
 
   lazy val createAlbum = {
-    get_JsonRes {
+    post_JsonRes {
       post {
-        path("albums" / IntNumber / "create") { albumId =>
+        //have to pass json but the concept remains the same. albumid = albumname
+        path("user"/"[a-zA-Z0-9]*".r /"albums" / "[a-zA-Z0-9]*".r  / "create") { (userId,albumId) =>
           complete {
-            //Read the params, update album id.
-            "done"
+          var f = Await.result(FBServers ? addAlbums(userId,albumId), timeout.duration)
+          if (f.isInstanceOf[NewUsersRes]) {
+            f.asInstanceOf[NewUsersRes]
+          } else if (f.isInstanceOf[Error]) {
+            f.asInstanceOf[Error]
+          } else {
+            Error("Failed due to internal error")
+          }
           }
         }
       }
@@ -175,12 +232,19 @@ object FacebookServer extends App with SimpleRoutingApp {
   }
 
   lazy val postPhoto = {
-    get_JsonRes {
+    post_JsonRes {
       post {
-        path("albums" / IntNumber / "photos") { albumId =>
+        //have to pass json but the concept remains the same. photo inside an album
+        path("user"/"[a-zA-Z0-9]*".r /"albums" / "[a-zA-Z0-9]*".r  / "photo"/"[a-zA-Z0-9]*".r ) { (userId,albumId,photoId) =>
           complete {
-            //save the new photo to db.
-            "created pic"
+          var f = Await.result(FBServers ? addPhoto(userId,albumId,photoId), timeout.duration)
+          if (f.isInstanceOf[NewUsersRes]) {
+            f.asInstanceOf[NewUsersRes]
+          } else if (f.isInstanceOf[Error]) {
+            f.asInstanceOf[Error]
+          } else {
+            Error("Failed due to internal error")
+          }
           }
         }
       }
@@ -213,6 +277,37 @@ class FBServer extends Actor with ActorLogging {
     case newUsr: NewUsersReq => {
       var newIds = populateUserBase(newUsr)
       sender ! newIds
+    }
+    case singleUsr: NewUserReq => {
+      var userId = singleUsr.username
+      if (!userbase.contains(userId)) {
+        var user = createUserWithID(userId)
+        userbase.put(userId, user)
+        var newIds = Array[String](userId)
+        sender ! NewUsersRes(newIds)
+      }
+      else {
+        log.error("Duplicate user id generated : " + userId)
+        var newIds = Array[String]("Username already exists")
+        sender ! NewUsersRes(newIds)
+      }
+    }
+    case fr: requestFriend => {
+      var userId = fr.userId
+      var frndId = fr.req.username
+      if (userbase.contains(userId) && userbase.contains(frndId) ) {
+        var user = userbase.get(userId)
+        user.get.addFriend(frndId)
+        var frnd = userbase.get(frndId)
+        frnd.get.addFriend(frndId)
+        var newIds = Array[String](frndId+"successfully added")
+        sender ! NewUsersRes(newIds)
+      }
+      else {
+        log.error("Either of user or friend id is unavialable: " + userId + frndId)
+        var newIds = Array[String]("Username doesnt exist")
+        sender ! NewUsersRes(newIds)
+      }
     }
     case gpr: findProfile => {
       var user = userbase.get(gpr.userId)
@@ -256,7 +351,35 @@ class FBServer extends Actor with ActorLogging {
     }
     case gfl: getFriendsList => {
       var user = userbase.get(gfl.userId)
-      //sender ! user.getFriendList()
+      if(user.get.friendList.contains(gfl.frndId) || gfl.userId.equals(gfl.frndId))
+      {
+        var it = user.get.getFriendList().iterator
+        var newIds = Array[String]()
+         while (it.hasNext) {
+                newIds = newIds :+ it.next()
+        }
+        sender ! NewUsersRes(newIds)
+      }
+      else {
+        var newIds = Array[String]("You dont have permission to view his friendlist")
+        sender ! NewUsersRes(newIds)
+      }
+    }
+    case aa : addAlbums => {
+      var user = userbase.get(aa.userId)
+      user.get.createAlbum(aa.albumId);
+      var ids = Array[String]()
+      var id = aa.albumId
+      ids = ids :+ id  
+      sender ! NewUsersRes(ids)
+    }
+    case ai : addPhoto => {
+      var user = userbase.get(ai.userId)
+      user.get.addPhoto(ai.userId,ai.albumId,ai.photoId);
+      var ids = Array[String]()
+      var id = ai.photoId
+      ids = ids :+ id  
+      sender ! NewUsersRes(ids)
     }
   }
 
@@ -270,7 +393,7 @@ class FBServer extends Actor with ActorLogging {
         var user = createUserWithID(userId)
         newIds = newIds :+ userId
         userbase.put(userId, user)
-        userIdOffset = 1;
+        userIdOffset = i;
         println("User Created : " + user.getPublicProfile())
       } else {
         //Should not happen
@@ -301,11 +424,11 @@ class UserInfo(val userid: String, var age: Int = -1, var firstName: String = ""
    * insert - Linear time
    * toList - Constant time
    */
-  var posts = new ListBuffer[Post]()
+  var posts = new ListBuffer[UserPost]()
 
-  var albumids = new java.util.ArrayList[String]()
+  var albumids = new ListBuffer[String]()
   var friendList = new ListBuffer[String]()
-  //var photoAlbum = new HashMap[String,photoids]()
+  var photoAlbum = new HashMap[String,java.util.ArrayList[String]]()
 
   def insertData(a: Int, fn: String, ln: String, gen: String) {
     age = a
@@ -314,7 +437,7 @@ class UserInfo(val userid: String, var age: Int = -1, var firstName: String = ""
     gender = gen
   }
 
-  def addToFeed(postId: String, post: Post) = {
+  def addToFeed(postId: String, post: UserPost) = {
     posts.prepend(post)
   }
 
@@ -332,6 +455,26 @@ class UserInfo(val userid: String, var age: Int = -1, var firstName: String = ""
 
   def getFriendList(): ListBuffer[String] = {
     friendList
+  }
+  
+  def createAlbum(albumId :String) {
+    albumids.append(albumId)
+  }
+  
+  def addPhoto(userId:String,albumId :String,photoId: String) {
+    //after json is sent updates Images class with photoid and photoid is stored below.
+    if(photoAlbum.containsKey(albumId))
+    {
+      var list = photoAlbum.get(albumId)
+      list.add(photoId);
+      photoAlbum.put(albumId, list)
+    }
+    else
+    {
+      var list = new java.util.ArrayList[String]()
+      list.add(photoId)
+      photoAlbum.put(albumId, list)
+    }
   }
 }
 
