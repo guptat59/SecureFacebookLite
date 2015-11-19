@@ -21,14 +21,25 @@ import scala.collection.mutable.ListBuffer
 import java.util.UUID
 import scala.collection.parallel.mutable.ParHashMap
 import spray.httpx.marshalling.ToResponseMarshaller
+import akka.routing.RoundRobinRouter
+import akka.routing.SmallestMailboxRouter
+import akka.routing.SmallestMailboxPool
+import java.util.HashMap
+import java.util.Arrays.ArrayList
+import org.slf4j.LoggerFactory
+import com.typesafe.scalalogging.Logger
+import com.typesafe.scalalogging.slf4j.Logger
+import java.util.Arrays.ArrayList
 
 object FacebookServer extends App with SimpleRoutingApp {
 
   implicit val system = ActorSystem("FacebookServer")
-  implicit val timeout = Timeout(10000)
+  implicit val timeout = Timeout(1000000)
 
   val routes = createProfiles ~
+    createProfile ~
     addPost ~
+    addFriend ~
     getPage ~
     getFrndList ~
     getProfiles ~
@@ -39,17 +50,23 @@ object FacebookServer extends App with SimpleRoutingApp {
 
   import jsonProtocol._
 
-  startServer(interface = "localhost", port = 8080) {
+  startServer(interface = "localhost", port = 9443) {
     createProfiles ~
+      createProfile ~
       getProfiles ~
+      addFriend ~
+      getFrndList ~
       addPost ~
-      getPage
+      getPage ~
+      createAlbum ~
+      postPhoto
   }
 
   val nrOfInstances: Int = 4
 
   val FBServers = system.actorOf(SmallestMailboxPool(nrOfInstances).props(Props(new FBServer())), name = "FB_Servers")
 
+  //val FBServers = system.actorOf( Props(new FBServer()).withRouter(SmallestMailboxRouter(5)), name = "FB_Servers")
   def buildaddPost(userId: String, post: UserPost): addPost = {
     var p = new addPost(UUID.randomUUID().toString(), userId, post)
     p
@@ -69,8 +86,8 @@ object FacebookServer extends App with SimpleRoutingApp {
         entity(as[NewUsersReq]) { newUsr =>
           complete {
             val f = Await.result(FBServers ? newUsr, timeout.duration);
-            if (f.isInstanceOf[NewUsersRes])
-              f.asInstanceOf[NewUsersRes]
+            if (f.isInstanceOf[UsersList])
+              f.asInstanceOf[UsersList]
             else if (f.isInstanceOf[Error])
               f.asInstanceOf[Error]
             else
@@ -81,6 +98,23 @@ object FacebookServer extends App with SimpleRoutingApp {
     }
   }
 
+  lazy val createProfile = {
+    post_JsonRes {
+      path("createuser") {
+        entity(as[NewUserReq]) { newUsr =>
+          complete {
+            val f = Await.result(FBServers ? newUsr, timeout.duration);
+            if (f.isInstanceOf[UsersList])
+              f.asInstanceOf[UsersList]
+            else if (f.isInstanceOf[Error])
+              f.asInstanceOf[Error]
+            else
+              Error("Failed due to internal error2")
+          }
+        }
+      }
+    }
+  }
   lazy val getProfiles = {
     get_JsonRes {
       path("profile" / "[a-zA-Z0-9]*".r) { userId =>
@@ -135,14 +169,32 @@ object FacebookServer extends App with SimpleRoutingApp {
     }
   }
 
+  lazy val addFriend = {
+    post_JsonRes {
+      path("user" / "[a-zA-Z0-9]*".r / "addfriend") { userId =>
+        entity(as[FriendReq]) { frndreq =>
+          complete {
+            val f = Await.result(FBServers ? requestFriend(userId, frndreq), timeout.duration);
+            if (f.isInstanceOf[UsersList])
+              f.asInstanceOf[UsersList]
+            else if (f.isInstanceOf[Error])
+              f.asInstanceOf[Error]
+            else
+              Error("Failed due to internal error2")
+          }
+        }
+      }
+    }
+  }
   lazy val getFrndList = {
     get_JsonRes {
+
       get {
-        path("friends" / "[a-zA-Z0-9]*".r / "friendLists") { userId =>
+        path("user" / "[a-zA-Z0-9]*".r / "friendslist" / "[a-zA-Z0-9]*".r) { (userId, frndId) =>
           complete {
-            var f = Await.result(FBServers ? getFriendsList(userId), timeout.duration)
-            if (f.isInstanceOf[FriendList]) {
-              f.asInstanceOf[FriendList]
+            var f = Await.result(FBServers ? getFriendsList(userId, frndId), timeout.duration)
+            if (f.isInstanceOf[UsersList]) {
+              f.asInstanceOf[UsersList]
             } else if (f.isInstanceOf[Error]) {
               f.asInstanceOf[Error]
             } else {
@@ -155,12 +207,21 @@ object FacebookServer extends App with SimpleRoutingApp {
   }
 
   lazy val createAlbum = {
-    get_JsonRes {
+    post_JsonRes {
       post {
-        path("albums" / IntNumber / "create") { albumId =>
-          complete {
-            //Read the params, update album id.
-            "done"
+        //have to pass json but the concept remains the same. albumid = albumname
+        path("user" / "[a-zA-Z0-9]*".r / "albums" / "create") { (userId) =>
+          entity(as[Album]) { album =>
+            complete {
+              var f = Await.result(FBServers ? addAlbums(userId, albumId), timeout.duration)
+              if (f.isInstanceOf[UsersList]) {
+                f.asInstanceOf[UsersList]
+              } else if (f.isInstanceOf[Error]) {
+                f.asInstanceOf[Error]
+              } else {
+                Error("Failed due to internal error")
+              }
+            }
           }
         }
       }
@@ -181,12 +242,19 @@ object FacebookServer extends App with SimpleRoutingApp {
   }
 
   lazy val postPhoto = {
-    get_JsonRes {
+    post_JsonRes {
       post {
-        path("albums" / IntNumber / "photos") { albumId =>
+        //have to pass json but the concept remains the same. photo inside an album
+        path("user" / "[a-zA-Z0-9]*".r / "albums" / "[a-zA-Z0-9]*".r / "photo" / "[a-zA-Z0-9]*".r) { (userId, albumId, photoId) =>
           complete {
-            //save the new photo to db.
-            "created pic"
+            var f = Await.result(FBServers ? addPhoto(userId, albumId, photoId), timeout.duration)
+            if (f.isInstanceOf[UsersList]) {
+              f.asInstanceOf[UsersList]
+            } else if (f.isInstanceOf[Error]) {
+              f.asInstanceOf[Error]
+            } else {
+              Error("Failed due to internal error")
+            }
           }
         }
       }
@@ -219,6 +287,33 @@ class FBServer extends Actor with ActorLogging {
     case newUsr: NewUsersReq => {
       var newIds = populateUserBase(newUsr)
       sender ! newIds
+    }
+    case singleUsr: NewUserReq => {
+      var userId = singleUsr.username
+      if (!userbase.contains(userId)) {
+        var user = createUserWithID(userId)
+        userbase.put(userId, user)
+        var newIds = Array[String](userId)
+        sender ! UsersList(newIds)
+      } else {
+        log.error("Duplicate user id generated : " + userId)
+        sender ! Error(Constants.messages.alreadyPresent + userId)
+      }
+    }
+    case fr: requestFriend => {
+      var userId = fr.userId
+      var frndId = fr.req.username
+      if (userbase.contains(userId) && userbase.contains(frndId)) {
+        var user = userbase.get(userId)
+        user.get.addFriend(frndId)
+        var frnd = userbase.get(frndId)
+        frnd.get.addFriend(frndId)
+        var newIds = Array[String](frndId + "successfully added")
+        sender ! UsersList(newIds)
+      } else {
+        log.error("Either of user or friend id is unavialable: " + userId + frndId)
+        sender ! Error(Constants.messages.noUser + userId + " or " + frndId)
+      }
     }
     case gpr: findProfile => {
       var user = userbase.get(gpr.userId)
@@ -262,16 +357,48 @@ class FBServer extends Actor with ActorLogging {
     }
     case gfl: getFriendsList => {
       var user = userbase.get(gfl.userId)
+
       if (user.isEmpty) {
         sender ! Error(Constants.messages.noUser)
       } else {
-        sender ! FriendList(user.get.getFriendList().toList.toArray)
+        if (gfl.frndId.isEmpty()) {
+          // Send your own friend list
+          sender ! UsersList(user.get.getFriendList().toList.toArray)
+        } else {
+          // Send your friends list
+          if (user.get.friendList.contains(gfl.frndId) || gfl.userId.equals(gfl.frndId)) {
+            var it = user.get.getFriendList().iterator
+            var newIds = Array[String]()
+            while (it.hasNext) {
+              newIds = newIds :+ it.next()
+            }
+            sender ! UsersList(newIds)
+          } else {
+            sender ! Error(Constants.messages.noPermission)
+          }
+        }
       }
+    }
+    case aa: addAlbums => {
+      var user = userbase.get(aa.userId)
+      user.get.createAlbum(aa.albumId);
+      var ids = Array[String]()
+      var id = aa.albumId
+      ids = ids :+ id
+      sender ! UsersList(ids)
+    }
+    case ai: addPhoto => {
+      var user = userbase.get(ai.userId)
+      user.get.addPhoto(ai.userId, ai.albumId, ai.photoId);
+      var ids = Array[String]()
+      var id = ai.photoId
+      ids = ids :+ id
+      sender ! UsersList(ids)
     }
   }
 
   private var userIdOffset = 0;
-  def populateUserBase(newUsr: NewUsersReq): NewUsersRes = {
+  def populateUserBase(newUsr: NewUsersReq): UsersList = {
     var newIds = Array[String]()
     for (i <- 0 until newUsr.count) {
       //Create user with given data.
@@ -280,14 +407,14 @@ class FBServer extends Actor with ActorLogging {
         var user = createUserWithID(userId)
         newIds = newIds :+ userId
         userbase.put(userId, user)
-        userIdOffset = 1;
+        userIdOffset += 1;
         println("User Created : " + user.getPublicProfile())
       } else {
         //Should not happen
         log.error("Duplicate user id generated : " + userId)
       }
     }
-    NewUsersRes(newIds)
+    UsersList(newIds)
   }
 
   //Helper methods
@@ -313,9 +440,9 @@ class UserInfo(val userid: String, var age: Int = -1, var firstName: String = ""
    */
   var posts = new ListBuffer[UserPost]()
 
-  var albumids = new java.util.ArrayList[String]()
+  var albumids = new ListBuffer[String]()
   var friendList = new ListBuffer[String]()
-  //var photoAlbum = new HashMap[String,photoids]()
+  var photoAlbums = new HashMap[String, ListBuffer[String]]()
 
   def insertData(a: Int, fn: String, ln: String, gen: String) {
     age = a
@@ -344,6 +471,22 @@ class UserInfo(val userid: String, var age: Int = -1, var firstName: String = ""
     friendList
   }
 
+  def createAlbum(albumId: String) {
+    albumids.append(albumId)
+  }
+
+  def addPhoto(userId: String, albumId: String, photoId: String) {
+    //after json is sent updates Images class with photoid and photoid is stored below.
+    if (photoAlbums.containsKey(albumId)) {
+      var list = photoAlbums.get(albumId)
+      //list.add(photoId);
+      photoAlbums.put(albumId, list)
+    } else {
+      var list = new java.util.ArrayList[String]()
+      list.add(photoId)
+      //photoAlbums.put(albumId, list)
+    }
+  }
 }
 
 class Images {
@@ -354,5 +497,120 @@ class Images {
     bytecode = bcode
     photoid = pid
     albumid = aid
+  }
+}
+
+class PictureAlbum(val ownerId: String, val albumId: String) {
+
+  var coverPhoto: Option[String] = None
+  var createdTime: String
+  var description: Option[String] = None
+  var place: Option[String] = None
+  var updateTime: String
+  var photos: ListBuffer[String]
+
+  def populate(pcoverPhoto: Option[String] = None, pdescription: Option[String] = None, pplace: Option[String] = None) {
+    coverPhoto = pcoverPhoto
+    description = pdescription
+    place = pplace
+    createdTime = System.currentTimeMillis().toString()
+    updateTime = System.currentTimeMillis().toString()
+    photos = new ListBuffer[String]
+  }
+
+  def addPicture(pic: Picture) {
+    if (pic != null) {
+      photos.append(pic.photoId)
+    }
+  }
+
+}
+
+class Picture(val albumId: String, val photoId: String, val src: String) {
+
+  var message: Option[String] = None
+  var place: Option[String] = None
+
+  def populate(pmessage: Option[String] = None, pplace: Option[String] = None) {
+
+    message = pmessage
+    place = pplace
+  }
+}
+
+object PhotoStore {
+
+  val log = Logger(LoggerFactory.getLogger("PhotoStore"))
+
+  private var userAlbums = new HashMap[String, ListBuffer[String]]
+  private var albumStore = new HashMap[String, PictureAlbum]
+  private var photoStore = new HashMap[String, Picture]
+
+  def initUserPhotoStore(userId: String): Boolean = {
+    if (userId != null) {
+      if (userAlbums.containsKey(userId)) {
+        //User already initialized. Nothing to do.
+        false
+      } else {
+        userAlbums.put(userId, new ListBuffer[String])
+        true
+      }
+    } else {
+      false
+    }
+  }
+
+  def addAlbumToUser(userId: String, album: Album) {
+
+    var userAlbumsList = userAlbums.get(userId);
+    if (userAlbumsList == null) {
+      //Does not exist. Do nothing.      
+    } else {
+      //Add this album to user album store.
+      if (userAlbumsList.contains(album.albumId)) {
+        // Album already exists for this user. Should not happen. Higher level check
+        log.error("Album already added!!")
+      } else {
+        userAlbumsList.append(album.albumId);
+        var picAlbum = new PictureAlbum(userId, album.albumId)
+        albumStore.put(album.albumId, picAlbum)
+      }
+    }
+  }
+
+  def addPhotoToAlbum(userId: String, albumId: String, photo: Photo) {
+    // Need not check userId, albumId. Higher level check
+    if (photoStore.get(photo.photoId) == null) {
+      if (albumStore.get(albumId) == null) {
+        //TODO return error, should not happen
+        log.error("Album not found")
+      } else {
+        // When security is implemented, content will be encrypted so it doesn't not matter to validate.
+        var album: PictureAlbum = albumStore.get(albumId)
+        var pic = new Picture(userId, albumId, photo.src);
+        pic.populate(photo.message, photo.place)
+        album.addPicture(pic)
+        photoStore.put(pic.photoId, pic)
+      }
+    } else {
+      //Photo already exists. Nothing to do
+      "asd"
+    }
+  }
+
+  def getUserAlbumsIds(userId: String): ListBuffer[String] = {
+    userAlbums.get(userId)
+  }
+
+  def getAlbumInfo(albumId: String): Album = {
+    var a = albumStore.get(albumId)
+    // case class Album(userId: String, albumId: String, coverPhoto: Option[String] = None, createdTime: Option[String] = None, description: Option[String] = None, from: Option[String] = None, place: Option[String] = None, updateTime: Option[String] = None, var photos: Array[String])
+
+    new Album(a.ownerId, a.albumId, a.coverPhoto, Option(a.createdTime), a.description, a.place, Option(a.updateTime), a.photos.toList.toArray)
+    
+  }
+
+  def getUserAlbumPhotos(userId: String, albumId: String) {
+
   }
 }
