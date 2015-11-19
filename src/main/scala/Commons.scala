@@ -34,9 +34,10 @@ trait anyjson
 case class User(userId: String, firstName: String, lastName: String, age: Int, gender: String) extends anyjson()
 case class NewUsersReq(count: Int, prefix: String, suffixLength: Int)
 case class NewUsersRes(userIds: Array[String])
-case class Post(message: String, link: String, place: String, privacy: String, object_attachment: String)
+case class UserPost(message: String, link: String, place: String, privacy: String, object_attachment: String)
 case class PostAdded(uuid: String, message: String)
-case class UserPage(posts: Array[Post])
+case class UserPage(posts: Array[UserPost])
+case class FriendList(list: Array[String])
 case class Error(reason: String)
 
 object jsonProtocol extends DefaultJsonProtocol with SprayJsonSupport {
@@ -46,19 +47,20 @@ object jsonProtocol extends DefaultJsonProtocol with SprayJsonSupport {
     def write(f: NewUsersRes) = f.userIds.toJson
   }
   implicit val UserFormat = jsonFormat5(User)
-  implicit val postFormat = jsonFormat5(Post)
+  implicit val postFormat = jsonFormat5(UserPost)
   implicit val postAddedFormat = jsonFormat2(PostAdded)
   implicit object postList extends RootJsonFormat[UserPage] {
-    def read(value: JsValue) = UserPage(value.convertTo[Array[Post]])
+    def read(value: JsValue) = UserPage(value.convertTo[Array[UserPost]])
     def write(f: UserPage) = f.posts.toJson
   }
   implicit def userPageFormat[Post: JsonFormat] = jsonFormat1(UserPage.apply)
+  implicit def friendListFormat = jsonFormat1(FriendList)
   implicit val errorFormat = jsonFormat1(Error)
 
 }
 
 case class findProfile(userId: String)
-case class addPost(postId: String, userId: String, post: Post) //extends Seal
+case class addPost(postId: String, userId: String, post: UserPost) //extends Seal
 case class addFriend(userId: String)
 case class getUserPage(userId: String)
 case class getFriendsList(userId: String)

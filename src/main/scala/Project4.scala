@@ -50,7 +50,7 @@ object FacebookServer extends App with SimpleRoutingApp {
 
   val FBServers = system.actorOf(SmallestMailboxPool(nrOfInstances).props(Props(new FBServer())), name = "FB_Servers")
 
-  def buildaddPost(userId: String, post: Post): addPost = {
+  def buildaddPost(userId: String, post: UserPost): addPost = {
     var p = new addPost(UUID.randomUUID().toString(), userId, post)
     p
   }
@@ -102,7 +102,7 @@ object FacebookServer extends App with SimpleRoutingApp {
     post_JsonRes {
       path("user" / "[a-zA-Z0-9]*".r / "feed") { userId =>
         //Verify the user. TODO        
-        entity(as[Post]) { postjson =>
+        entity(as[UserPost]) { postjson =>
           complete {
             val f = Await.result(FBServers ? buildaddPost(userId, postjson), timeout.duration)
             if (f.isInstanceOf[PostAdded]) {
@@ -138,10 +138,16 @@ object FacebookServer extends App with SimpleRoutingApp {
   lazy val getFrndList = {
     get_JsonRes {
       get {
-        path("friends" / IntNumber / "friendLists") { userId =>
-          ctx => ctx.complete {
-            //JSon array of user ids.
-            "list"
+        path("friends" / "[a-zA-Z0-9]*".r / "friendLists") { userId =>
+          complete {
+            var f = Await.result(FBServers ? getFriendsList(userId), timeout.duration)
+            if (f.isInstanceOf[FriendList]) {
+              f.asInstanceOf[FriendList]
+            } else if (f.isInstanceOf[Error]) {
+              f.asInstanceOf[Error]
+            } else {
+              Error("Failed due to internal error")
+            }
           }
         }
       }
@@ -256,7 +262,11 @@ class FBServer extends Actor with ActorLogging {
     }
     case gfl: getFriendsList => {
       var user = userbase.get(gfl.userId)
-      //sender ! user.getFriendList()
+      if (user.isEmpty) {
+        sender ! Error(Constants.messages.noUser)
+      } else {
+        sender ! FriendList(user.get.getFriendList().toList.toArray)
+      }
     }
   }
 
@@ -301,7 +311,7 @@ class UserInfo(val userid: String, var age: Int = -1, var firstName: String = ""
    * insert - Linear time
    * toList - Constant time
    */
-  var posts = new ListBuffer[Post]()
+  var posts = new ListBuffer[UserPost]()
 
   var albumids = new java.util.ArrayList[String]()
   var friendList = new ListBuffer[String]()
@@ -314,7 +324,7 @@ class UserInfo(val userid: String, var age: Int = -1, var firstName: String = ""
     gender = gen
   }
 
-  def addToFeed(postId: String, post: Post) = {
+  def addToFeed(postId: String, post: UserPost) = {
     posts.prepend(post)
   }
 
@@ -333,6 +343,7 @@ class UserInfo(val userid: String, var age: Int = -1, var firstName: String = ""
   def getFriendList(): ListBuffer[String] = {
     friendList
   }
+
 }
 
 class Images {
