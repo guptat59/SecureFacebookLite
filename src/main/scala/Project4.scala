@@ -31,9 +31,11 @@ import com.typesafe.scalalogging.Logger
 import com.typesafe.scalalogging.slf4j.Logger
 import java.util.ArrayList
 import scala.collection.JavaConversions._
+import scala.collection.immutable.TreeMap
 
 object FacebookServer extends App with SimpleRoutingApp {
 
+  //var userbase = new ParHashMap[String, UserInfo]()
   implicit val system = ActorSystem("FacebookServer")
   implicit val timeout = Timeout(1000000)
 
@@ -51,7 +53,7 @@ object FacebookServer extends App with SimpleRoutingApp {
 
   import jsonProtocol._
 
-  startServer(interface = "localhost", port = 9443) {
+  startServer(interface = "localhost", port = 8080) {
     createProfiles ~
       createProfile ~
       getProfiles ~
@@ -60,13 +62,14 @@ object FacebookServer extends App with SimpleRoutingApp {
       addPost ~
       getPage ~
       createAlbum ~
-      postPhoto
+      getAlbumInfo ~
+      postPhoto ~
+      initSystem 
   }
 
   val nrOfInstances: Int = 4
 
   val FBServers = system.actorOf(SmallestMailboxPool(nrOfInstances).props(Props(new FBServer())), name = "FB_Servers")
-
   //val FBServers = system.actorOf( Props(new FBServer()).withRouter(SmallestMailboxRouter(5)), name = "FB_Servers")
   def buildaddPost(userId: String, post: UserPost): addPost = {
     var p = new addPost(UUID.randomUUID().toString(), userId, post)
@@ -80,7 +83,30 @@ object FacebookServer extends App with SimpleRoutingApp {
   def post_JsonRes(route: Route) = post {
     respondWithMediaType(MediaTypes.`application/json`) { route }
   }
-
+  var sysBoot = false
+  lazy val initSystem = {
+    post_JsonRes {
+      path("systemboot") {
+        complete {
+          if (sysBoot) {
+            Error("System is already set")
+          }
+          else{
+            val f = Await.result(FBServers ? systemSetup(), timeout.duration);
+            if (f.isInstanceOf[Success])
+            {
+              sysBoot = true
+              f.asInstanceOf[Success]
+             }
+            else if (f.isInstanceOf[Error])
+              f.asInstanceOf[Error]
+            else
+              Error("Failed due to internal error2")
+          }
+      }
+    }
+  }
+  }
   lazy val createProfiles = {
     post_JsonRes {
       path("createusers") {
@@ -260,8 +286,8 @@ object FacebookServer extends App with SimpleRoutingApp {
           entity(as[Photo]) { photo =>
             complete {
               var f = Await.result(FBServers ? photo, timeout.duration)
-              if (f.isInstanceOf[UsersList]) {
-                f.asInstanceOf[UsersList]
+              if (f.isInstanceOf[Success]) {
+                f.asInstanceOf[Success]
               } else if (f.isInstanceOf[Error]) {
                 f.asInstanceOf[Error]
               } else {
@@ -296,6 +322,37 @@ class FBServer extends Actor with ActorLogging {
 
   def receive = {
 
+    case su: systemSetup => {
+    populateUsers()
+    populateFriends()  
+    populatePosts()
+    populatePhotoAlbums()
+    println(userbase)
+    for(i <- 1 to 100)
+    {
+      var userId = "user"+i
+      if (userbase.contains("user"+i))
+      {
+          var user = userbase.get(userId)
+          println("I am " + userId)
+          println("My friends "+user.get.friendList)
+          println("My feed")
+         
+          for(u <-   user.get.posts)
+          {
+            println(u.message)
+          }
+          println("My albums"+user.get.getAlbumInfo(userId+"album1"))
+          println("My Photos")
+           for(u <- user.get.getAlbumInfo(userId+"album1").photos)
+          {
+            println(u)
+          }
+          println("#####################")
+      }
+    }
+        sender ! Success("Created users")
+    }
     case newUsr: NewUsersReq => {
       var newIds = populateUserBase(newUsr)
       sender ! newIds
@@ -315,7 +372,7 @@ class FBServer extends Actor with ActorLogging {
     case fr: requestFriend => {
       var userId = fr.userId
       var frndId = fr.req.username
-      if (userbase.contains(userId) && userbase.contains(frndId)) {
+      if (userbase.contains(userId) && userbase.contains(frndId) && userId != frndId) {
         var user = userbase.get(userId)
         user.get.addFriend(frndId)
         var frnd = userbase.get(frndId)
@@ -453,6 +510,87 @@ class FBServer extends Actor with ActorLogging {
     UsersList(newIds)
   }
 
+  def populateUsers()
+  {
+    for(i <- 1 to Constants.totalUsers)
+      {
+        var userId = "user" + i
+        var user = createUserWithID(userId)
+        userbase.put(userId, user)
+      }
+  }
+  
+  def populatePosts()
+  {
+     for(i <- 1 to Constants.totalUsers)
+      {
+        var userId = "user"+i
+        //if(userbase.contains(userId))
+        //{
+          var user = userbase.get(userId)
+          var r= 1;
+          while(r <= Constants.initialPostsCount)
+          {
+            var post = new UserPost(userId+"post"+r,None,None,"friends")
+            var id = UUID.randomUUID().toString()
+            user.get.addToFeed(id, post)
+            r = r +1
+            var it = user.get.getFriendList().iterator
+              while (it.hasNext) {
+                var friendId = it.next()
+                var friend = userbase.get(friendId)
+                friend.get.addToFeed(id, post)
+              }
+          }
+       /* }
+        else {
+          println(userId+ " not found")
+        }*/
+      }
+  }
+  
+  def populateFriends()
+  {
+     for(i <- 1 to Constants.totalUsers)
+      {
+        var userId = "user"+i
+        /*if(userbase.contains(userId))
+        {*/
+            var user = userbase.get(userId)
+            var j = 1
+            while (j <= Constants.numOfFriends) {
+            var r = Random.nextInt(Constants.totalUsers)
+            if (!(user.get.friendList.contains("user" + r)) && r != i) {
+              var frnd = userbase.get("user" + r)
+              user.get.addFriend("user" + r)
+              frnd.get.addFriend(userId)
+              j = j + 1
+             }
+            }
+      // }
+      }
+  }
+  
+  def populatePhotoAlbums()
+  {
+    for(i <- 1 to Constants.totalUsers)
+      {
+          var userId = "user"+i
+         /* if (userbase.contains("user"+i))
+          {
+            */
+          var user = userbase.get(userId)
+          var j = 1;
+          while (j <= Constants.initialAlbumsCount)
+          {
+            var list = Array("photo1", "photo2", "photo3")
+            var photo = new Album(userId,userId+"album"+j,None,None,None,None,None,list)
+            user.get.addAlbumToUser(userId, photo);
+            j = j +1
+          }
+          //}
+      }
+  }
   //Helper methods
   def createUserWithID(userId: String): UserInfo = {
     var user = new UserInfo(userId);
@@ -476,12 +614,13 @@ class UserInfo(val userid: String, var age: Int = -1, var firstName: String = ""
    */
   var posts = new ListBuffer[UserPost]()
   var friendList = new ListBuffer[String]()
-  val log = Logger(LoggerFactory.getLogger("PhotoStore"))
+  val log = Logger(LoggerFactory.getLogger("UserInfo"))
 
-  private var userAlbums = new HashMap[String, ListBuffer[String]]
+  private var userAlbums = new ListBuffer[String]
   private var albumStore = new HashMap[String, PictureAlbum]
   private var photoStore = new HashMap[String, Picture]
 
+  
   def insertData(a: Int, fn: String, ln: String, gen: String) {
     age = a
     firstName = fn
@@ -510,7 +649,7 @@ class UserInfo(val userid: String, var age: Int = -1, var firstName: String = ""
   }
 
   def initUserPhotoStore(userId: String): Boolean = {
-    if (userId != null) {
+   /* if (userId != null) {
       if (userAlbums.containsKey(userId)) {
         //User already initialized. Nothing to do.
         false
@@ -520,27 +659,23 @@ class UserInfo(val userid: String, var age: Int = -1, var firstName: String = ""
       }
     } else {
       false
-    }
+    }*/
+    true
   }
 
   def addAlbumToUser(userId: String, album: Album): Boolean = {
 
-    var userAlbumsList = userAlbums.get(userId);
-    if (userAlbumsList == null) {
-      //Does not exist. Do nothing.      
-    } else {
       //Add this album to user album store.
-      if (userAlbumsList.contains(album.albumId)) {
+      if (userAlbums.contains(album.albumId)) {
         // Album already exists for this user. Should not happen. Higher level check
         log.error("Album already added!!")
+        false
       } else {
-        userAlbumsList.append(album.albumId);
+        userAlbums.append(album.albumId);
         var picAlbum = new PictureAlbum(userId, album.albumId)
         albumStore.put(album.albumId, picAlbum)
         true
       }
-    }
-    false
   }
 
   def addPhotoToAlbum(userId: String, albumId: String, photo: Photo): Boolean = {
@@ -549,6 +684,7 @@ class UserInfo(val userid: String, var age: Int = -1, var firstName: String = ""
       if (albumStore.get(albumId) == null) {
         //TODO return error, should not happen
         log.error("Album not found")
+        false
       } else {
         // When security is implemented, content will be encrypted so it doesn't not matter to validate.
         var album: PictureAlbum = albumStore.get(albumId)
@@ -561,12 +697,12 @@ class UserInfo(val userid: String, var age: Int = -1, var firstName: String = ""
     } else {
       //Photo already exists. Nothing to do
       log.error("Photo already exists!!")
+      false
     }
-    false
   }
 
   def getUserAlbumsIds(userId: String): ListBuffer[String] = {
-    userAlbums.get(userId)
+    userAlbums
   }
 
   def getAlbumInfo(albumId: String): Album = {
@@ -576,7 +712,7 @@ class UserInfo(val userid: String, var age: Int = -1, var firstName: String = ""
   }
 
   def getUserAlbums(userId: String): Array[Album] = {
-    var a = userAlbums.get(userId);
+    var a = userAlbums;
     var it = a.iterator
     var albums = Array[Album]()
     while (it.hasNext) {

@@ -8,6 +8,12 @@ import scala.collection.mutable.ListBuffer
 import java.util.ArrayList
 
 object Constants {
+
+  val totalUsers = 1000
+  val numOfFriends = 2 * (totalUsers/100)
+  val initialAlbumsCount = 2
+  val initialPostsCount = 3
+
   object privacy {
     val friends = "friends"
     val personal = "personal"
@@ -83,15 +89,16 @@ case class getFriendsList(userId: String, frndId: String)
 case class getPhotos(userId: String)
 case class getUserAlbums(userId: String)
 case class getUserAlbumInfo(userId: String, albumId: String)
+case class systemSetup()
 
 class PictureAlbum(val ownerId: String, val albumId: String) {
 
   var coverPhoto: Option[String] = None
-  var createdTime: String
+  var createdTime: String = null
   var description: Option[String] = None
   var place: Option[String] = None
-  var updateTime: String
-  var photos: ListBuffer[String]
+  var updateTime: String = null
+  var photos: ListBuffer[String] = new ListBuffer[String]
 
   def populate(pcoverPhoto: Option[String] = None, pdescription: Option[String] = None, pplace: Option[String] = None) {
     coverPhoto = pcoverPhoto
