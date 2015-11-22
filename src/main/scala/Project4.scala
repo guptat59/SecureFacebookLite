@@ -327,7 +327,7 @@ class FBServer extends Actor with ActorLogging {
     populateFriends()  
     populatePosts()
     populatePhotoAlbums()
-    println(userbase)
+    
     for(i <- 1 to 100)
     {
       var userId = "user"+i
@@ -559,7 +559,7 @@ class FBServer extends Actor with ActorLogging {
             var user = userbase.get(userId)
             var j = 1
             while (j <= Constants.numOfFriends) {
-            var r = Random.nextInt(Constants.totalUsers)
+            var r = Random.nextInt(Constants.totalUsers)+1
             if (!(user.get.friendList.contains("user" + r)) && r != i) {
               var frnd = userbase.get("user" + r)
               user.get.addFriend("user" + r)
@@ -583,7 +583,7 @@ class FBServer extends Actor with ActorLogging {
           var j = 1;
           while (j <= Constants.initialAlbumsCount)
           {
-            var list = Array("photo1", "photo2", "photo3")
+            var list = Some( Array("photo1", "photo2", "photo3"))
             var photo = new Album(userId,userId+"album"+j,None,None,None,None,None,list)
             user.get.addAlbumToUser(userId, photo);
             j = j +1
@@ -707,7 +707,7 @@ class UserInfo(val userid: String, var age: Int = -1, var firstName: String = ""
 
   def getAlbumInfo(albumId: String): Album = {
     var a = albumStore.get(albumId)
-    var b = new Album(a.ownerId, a.albumId, a.coverPhoto, Option(a.createdTime), a.description, a.place, Option(a.updateTime), a.photos.toList.toArray)
+    var b = new Album(a.ownerId, a.albumId, a.coverPhoto, Option(a.createdTime), a.description, a.place, Option(a.updateTime), Option(a.photos.toList.toArray))
     b
   }
 

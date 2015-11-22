@@ -46,14 +46,14 @@ object UserLoginJsonSupport extends DefaultJsonProtocol with SprayJsonSupport {
 //JSON Types
 trait anyjson
 case class User(userId: String, firstName: String, lastName: String, age: Int, gender: String) extends anyjson()
-case class NewUsersReq(count: Int, prefix: String, suffixLength: Option[Int] = None)
-case class NewUserReq(username: String)
+case class NewUsersReq(count: Int, prefix: String, suffixLength: Option[Int] = None) 
+case class NewUserReq(username: String) 
 case class FriendReq(username: String)
 case class UsersList(userIds: Array[String])
 case class UserPost(message: String, link: Option[String] = None, place: Option[String] = None, privacy: String, object_attachment: Option[String] = None)
 case class PostAdded(uuid: String, message: String)
 case class UserPage(posts: Array[UserPost])
-case class Album(userId: String, albumId: String, coverPhoto: Option[String] = None, createdTime: Option[String] = None, description: Option[String] = None, place: Option[String] = None, updateTime: Option[String] = None, var photos: Array[String])
+case class Album(userId: String, albumId: String, coverPhoto: Option[String] = None, createdTime: Option[String] = None, description: Option[String] = None, place: Option[String] = None, updateTime: Option[String] = None,  var photos: Option[Array[String]] = None)
 case class Photo(userId: String, albumId: String, photoId: String, src: String, message: Option[String] = None, place: Option[String] = None, noStory: Boolean = false)
 case class Success(reason: String)
 case class Error(reason: String)
