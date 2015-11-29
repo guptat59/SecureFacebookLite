@@ -1,5 +1,3 @@
-
-
 import spray.http.DateTime
 import spray.httpx.SprayJsonSupport
 import spray.json._
@@ -10,7 +8,7 @@ import java.util.ArrayList
 object Constants {
 
   val totalUsers = 1000
-  val numOfFriends = 2 * (totalUsers/100)
+  val numOfFriends = 2 * (totalUsers / 100)
   val initialAlbumsCount = 2
   val initialPostsCount = 3
 
@@ -44,8 +42,10 @@ object UserLoginJsonSupport extends DefaultJsonProtocol with SprayJsonSupport {
 }
 
 //JSON Types
+//found : Any required: spray.httpx.marshalling.ToResponseMarshallable
+
 trait anyjson
-case class User(userId: String, firstName: String, lastName: String, age: Int, gender: String) extends anyjson()
+case class User(userId: String, firstName: String, lastName: String, age: Int, gender: String)
 case class NewUsersReq(count: Int, prefix: String, suffixLength: Option[Int] = None)
 case class NewUserReq(username: String)
 case class FriendReq(username: String)
