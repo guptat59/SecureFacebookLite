@@ -37,6 +37,8 @@ object Constants {
     val photoAddFailed = "Photo addition to user album failed"
   }
 
+  val places = Array[String]("Colorado" , "Sweden" , "Mumbai" , "Romania" , "Italy" , "Paris")
+  
   val prefix = "src\\main\\resources\\"
   val images = Array[String](prefix + "Hello.jpg", prefix + "Secure.jpg", prefix + "World.jpg")
 }
@@ -66,7 +68,7 @@ case class Album(userId: String, albumId: String, coverPhoto: Option[String] = N
 case class Photo(userId: String, albumId: String, photoId: String, src: String, message: Option[String] = None, place: Option[String] = None, noStory: Boolean = false)
 case class Success(reason: String)
 case class Error(reason: String)
-case class UserProfile(u : User, a: Array[Album])
+case class UserAlbums(a: Array[Album])
 
 object jsonProtocol extends DefaultJsonProtocol with SprayJsonSupport with NullOptions with AdditionalFormats {
   implicit val FriendReqFormat = jsonFormat2(FriendRequest)
@@ -85,19 +87,18 @@ object jsonProtocol extends DefaultJsonProtocol with SprayJsonSupport with NullO
   implicit def userPageFormat[Post: JsonFormat] = jsonFormat1(UserPage.apply)
   implicit val albumFormat = jsonFormat8(Album)
   implicit val photoFormat = jsonFormat7(Photo)
-  implicit val userProfileFormat = jsonFormat2(UserProfile)
+  implicit val userProfileFormat = jsonFormat1(UserAlbums)
   implicit val errorFormat = jsonFormat1(Error)
   implicit val successFormat = jsonFormat1(Success)
 }
 
-case class findProfile(userId: String)//, reqUserId : String)
+case class findProfile(userId: String)
 case class addPost(postId: String, userId: String, post: UserPost) //extends Seal
 case class addFriend(userId: String)
 case class getUserPage(userId: String)
 case class getFriendsList(userId: String, frndId: String)
 case class getPhotos(userId: String)
-case class getUserAlbums(userId: String)
-case class getUserAlbumInfo(userId: String, albumId: String)
+case class getUserAlbums(userId: String, frndId: Option[String])
 case class systemSetup()
 
 class PictureAlbum(val ownerId: String, val albumId: String) {

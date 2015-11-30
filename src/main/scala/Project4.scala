@@ -93,20 +93,19 @@ object FacebookServer extends App with SimpleRoutingApp {
                 Error("Failed due to internal error2")
             }
           }
-        } ~
-          post {
-            entity(as[User]) { newUsr =>
-              complete {
-                val f = Await.result(FBServers ? newUsr, timeout.duration);
-                if (f.isInstanceOf[Success])
-                  f.asInstanceOf[Success]
-                else if (f.isInstanceOf[Error])
-                  f.asInstanceOf[Error]
-                else
-                  Error("Failed due to internal error2")
-              }
+        } ~ post {
+          entity(as[User]) { newUsr =>
+            complete {
+              val f = Await.result(FBServers ? newUsr, timeout.duration);
+              if (f.isInstanceOf[Success])
+                f.asInstanceOf[Success]
+              else if (f.isInstanceOf[Error])
+                f.asInstanceOf[Error]
+              else
+                Error("Failed due to internal error2")
             }
           }
+        }
       }
     }
   }
@@ -118,8 +117,6 @@ object FacebookServer extends App with SimpleRoutingApp {
           val f = Await.result(FBServers ? findProfile(userId), timeout.duration)
           if (f.isInstanceOf[User]) {
             f.asInstanceOf[User]
-          } else if (f.isInstanceOf[UserProfile]) {
-            f.asInstanceOf[UserProfile]
           } else if (f.isInstanceOf[Error]) {
             f.asInstanceOf[Error]
           } else {
@@ -229,26 +226,32 @@ object FacebookServer extends App with SimpleRoutingApp {
         }
       } ~
         delete {
-          // TODO 
+          complete {
+            Error("TODO")
+          }
         } ~
         post {
-          // TODO
+          complete {
+            Error("TODO")
+          }
         }
     }
   }
 
   lazy val getAlbumInfo = {
-    get_JsonRes {
-      get {
-        path("albums" / "[a-zA-Z0-9]*".r) { userId =>
-          complete {
-            var f = Await.result(FBServers ? getUserAlbums(userId), timeout.duration)
-            if (f.isInstanceOf[Array[Album]]) {
-              f.asInstanceOf[Array[Album]]
-            } else if (f.isInstanceOf[Error]) {
-              f.asInstanceOf[Error]
-            } else {
-              Error("Failed due to internal error")
+    jsonRes {
+      path("user" / "[a-zA-Z0-9]*".r / "albums") { userId =>
+        get {
+          parameters("frndId"?) { frndId =>
+            complete {
+              var f = Await.result(FBServers ? getUserAlbums(userId, frndId), timeout.duration)
+              if (f.isInstanceOf[Array[Album]]) {
+                f.asInstanceOf[Array[Album]]
+              } else if (f.isInstanceOf[Error]) {
+                f.asInstanceOf[Error]
+              } else {
+                Error("Failed due to internal error")
+              }
             }
           }
         }
@@ -277,10 +280,14 @@ object FacebookServer extends App with SimpleRoutingApp {
         }
       } ~
         post {
-
+          complete {
+            Error("TODO")
+          }
         } ~
         delete {
-
+          complete {
+            Error("TODO")
+          }
         }
     }
   }
@@ -427,7 +434,11 @@ object FacebookServer extends App with SimpleRoutingApp {
         if (user.isEmpty) {
           sender ! Error(Constants.messages.noUser)
         } else {
-          sender ! user.get.getUserAlbums(gai.userId)
+          if (gai.userId.equals(gai.frndId)) {
+            sender ! user.get.getUserAlbums(gai.userId)
+          } else if (!gai.frndId.isEmpty && userbase.contains(gai.frndId.get)) {
+            sender ! user.get.getUserAlbums(gai.frndId.get)
+          }
         }
       }
 
@@ -468,7 +479,7 @@ object FacebookServer extends App with SimpleRoutingApp {
      * insert - Linear time
      * toList - Constant time
      */
-    
+
     var posts = new ListBuffer[UserPost]()
     var friendList = new ListBuffer[String]()
     val log = Logger(LoggerFactory.getLogger("UserInfo"))

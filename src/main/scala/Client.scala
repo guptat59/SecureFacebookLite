@@ -86,6 +86,20 @@ object FacebookSimulator {
 
     Thread.sleep(1000)
 
+    createAlbums()
+
+    while (albumsAdded.get() < Constants.totalUsers) {
+      Thread.sleep(1000)
+      println("Waiting till all the users have at least one album!! : " + albumsAdded.get())
+    }
+
+    createPhotos()
+    
+    while (photosAdded.get() < Constants.totalUsers) {
+      Thread.sleep(1000)
+      println("Waiting till all the users have at least one album!! : " + albumsAdded.get())
+    }
+
     var firstTime = true;
 
     var userName = userPrefix + (Random.nextInt(Constants.totalUsers) + 1)
@@ -126,8 +140,8 @@ object FacebookSimulator {
 
         println("get album info>> ")
 
-        user ? getAlbumsInfo(); Thread.sleep(sleepdelay)
-        frnd ? getAlbumsInfo(); Thread.sleep(sleepdelay)
+        user ? getUserAlbums(userName, Some(frndName)); Thread.sleep(sleepdelay)
+        frnd ? getUserAlbums(frndName, Some(userName)); Thread.sleep(sleepdelay)
 
       }
       Thread.sleep(10000)
@@ -139,10 +153,12 @@ object FacebookSimulator {
 
   var createdUsers = new AtomicInteger(0);
   var frndsAdded = new AtomicInteger(0);
+  var albumsAdded = new AtomicInteger(0);
+  var photosAdded = new AtomicInteger(0);
 
   def createUsers(): Unit = {
 
-    for (i <- 0 to Constants.totalUsers) {
+    for (i <- 0 until Constants.totalUsers) {
       var userId = userPrefix + i
       var user = system.actorOf(Props(new UserClient(userId)), userId)
       var u = new User(userId, "First-" + userId, "Last-" + userId, Random.nextInt(100) + 1, Gender.apply(Random.nextInt(Gender.maxId)).toString());
@@ -171,6 +187,22 @@ object FacebookSimulator {
 
       var fr = new FriendRequest(userId, fList);
       user ! fr
+    }
+  }
+
+  def createAlbums(): Unit = {
+    for (i <- 0 to Constants.totalUsers) {
+      var userId = userPrefix + i
+      var user = system.actorSelection(namingPrefix + userId)
+      user ! addDefaultAlbum()
+    }
+  }
+
+  def createPhotos(): Unit = {
+    for (i <- 0 to Constants.totalUsers) {
+      var userId = userPrefix + i
+      var user = system.actorSelection(namingPrefix + userId)
+      user ! addDefaultImages()
     }
   }
 
@@ -247,7 +279,10 @@ object FacebookSimulator {
   case class getPage()
   case class getProfile(userId: String)
   case class getFriendList(userId: String, frndId: String)
-  case class getAlbumsInfo()
+  case class addDefaultAlbum()
+  case class addDefaultImages()
+  case class addImage()
+  case class addAlbum()
 
   class UserClient(userId: String) extends Actor with SprayJsonSupport with AdditionalFormats with ActorLogging {
     implicit val system = context.system
@@ -300,7 +335,6 @@ object FacebookSimulator {
         result.onComplete {
           x =>
             {
-              frndsAdded.incrementAndGet()
               x.foreach { res => log.debug(res.entity.asString) }
             }
         }
@@ -312,7 +346,6 @@ object FacebookSimulator {
         result.onComplete {
           x =>
             {
-              frndsAdded.incrementAndGet()
               x.foreach { res => log.debug(res.entity.asString) }
             }
         }
@@ -324,7 +357,6 @@ object FacebookSimulator {
         result.onComplete {
           x =>
             {
-              frndsAdded.incrementAndGet()
               x.foreach { res => log.debug(res.entity.asString) }
             }
         }
@@ -338,53 +370,91 @@ object FacebookSimulator {
         result.onComplete {
           x =>
             {
-              frndsAdded.incrementAndGet()
+              x.foreach { res => log.debug(res.entity.asString) }
+            }
+        }
+      }
+
+      case a: addDefaultAlbum => {
+        var result = addAlbum(Album(userId, userId + "-defaultalbum", None, Some(System.currentTimeMillis().toString()), Option("initial album"), Option(Constants.places(Random.nextInt(Constants.places.length))), Some(System.currentTimeMillis().toString()), None))
+        result.onComplete {
+          x =>
+            {
+              albumsAdded.incrementAndGet()
               x.foreach { res => log.debug(res.entity.asString) }
             }
         }
       }
 
       case a: Album => {
-        var userId = a.userId
-        var albumId = a.albumId
-        var coverPhoto = a.coverPhoto
-        var createdTime = a.createdTime
-        var description = a.description
-        var place = a.place
-        var updateTime = a.updateTime
-        var photos = a.photos
-        log.info(photos.mkString(","))
-        var photostring = a.photos.mkString(",")
-        val result: Future[HttpResponse] = pipeline(Post(Constants.serverURL + "/user/" + userId + "/albums/create", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId", "albumId" :"$albumId", "coverPhoto" : "$coverPhoto", "createdTime" : "$createdTime", "description" : "$description", "place":"$place", "updateTime" :"$updateTime", "photos" : [""]}""")))
-        result.foreach {
-          response =>
-            log.info(s"added album:\n${response.entity.asString}")
+        var result = addAlbum(a)
+        result.onComplete {
+          x =>
+            {
+              x.foreach { res => log.debug(res.entity.asString) }
+            }
+        }
+      }
+
+      case a: addDefaultImages => {
+        var src = readImage(Constants.images(Random.nextInt(Constants.images.length)))
+        //userId: String, albumId: String, photoId: String, src: String, message: Option[String] = None, place: Option[String] = None, noStory: Boolean = false)
+        var p = Photo(userId, userId + "-defaultalbum", userId + "-defaultphoto", src, Some("Default first image"), Option(Constants.places(Random.nextInt(Constants.places.length))), false)
+        var result = addImage(p)
+        result.onComplete {
+          x =>
+            {
+              photosAdded.incrementAndGet()
+              x.foreach { res => log.debug(res.entity.asString) }
+            }
         }
       }
 
       case p: Photo => {
-        var userId = p.userId
-        var albumId = p.albumId
-        var message = p.message
-        var noStory = p.noStory
-        var photoId = p.photoId
-        var place = p.place
-        var src = p.src
-        val result: Future[HttpResponse] = pipeline(Post(Constants.serverURL + "/user/" + userId + "/albums/photo", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId", "albumId" : "$albumId", "place": "$place","photoId": "$photoId", "src": "$src", "message": "$message", "noStory": $noStory}""")))
+        var result = addImage(p)
         result.foreach {
           response =>
             log.info(s"Photo added:\n${response.entity.asString}")
         }
       }
 
-      case aa: getAlbumsInfo => {
+      case aa: getUserAlbums => {
         val result: Future[HttpResponse] = pipeline(Get(Constants.serverURL + "/albums/" + userId))
-        result.foreach {
-          response =>
-            log.info(s"Albums:\n${response.entity.asString}")
+        Await.result(result, timeout.duration)
+        result.onComplete {
+          x =>
+            {
+              frndsAdded.incrementAndGet()
+              x.foreach { res => log.debug(res.entity.asString) }
+              sender ! x.asInstanceOf[UserAlbums]
+            }
         }
       }
+    }
 
+    def addAlbum(a: Album): Future[HttpResponse] = {
+      var userId = a.userId
+      var albumId = a.albumId
+      var coverPhoto = a.coverPhoto
+      var createdTime = a.createdTime
+      var description = a.description
+      var place = a.place
+      var updateTime = a.updateTime
+      var photos = a.photos
+      log.info(photos.mkString(","))
+      var photostring = a.photos.mkString(",")
+      pipeline(Post(Constants.serverURL + "/user/" + userId + "/albums/create", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId", "albumId" :"$albumId", "coverPhoto" : "$coverPhoto", "createdTime" : "$createdTime", "description" : "$description", "place":"$place", "updateTime" :"$updateTime", "photos" : [""]}""")))
+    }
+
+    def addImage(p: Photo): Future[HttpResponse] = {
+      var userId = p.userId
+      var albumId = p.albumId
+      var message = p.message
+      var noStory = p.noStory
+      var photoId = p.photoId
+      var place = p.place
+      var src = p.src
+      pipeline(Post(Constants.serverURL + "/user/" + userId + "/albums/photo", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId", "albumId" : "$albumId", "place": "$place","photoId": "$photoId", "src": "$src", "message": "$message", "noStory": $noStory}""")))
     }
 
     //Image content will be encrypted and server does not know how to decrypt  
