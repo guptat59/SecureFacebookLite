@@ -47,8 +47,7 @@ object FacebookServer extends App with SimpleRoutingApp {
       getFrndList ~
       addPost ~
       getPage ~
-      createAlbum ~
-      getAlbumInfo ~
+      album ~
       postPhoto
 
   import jsonProtocol._
@@ -117,31 +116,13 @@ object FacebookServer extends App with SimpleRoutingApp {
     }
 
   lazy val getProfiles = {
-    get_JsonRes {
-      path("profile" / "[a-zA-Z0-9]*".r) { userId =>
-        complete {
-          val f = Await.result(FBServers ? findProfile(userId), timeout.duration)
-          if (f.isInstanceOf[User]) {
-            f.asInstanceOf[User]
-          } else if (f.isInstanceOf[Error]) {
-            f.asInstanceOf[Error]
-          } else {
-            Error("Failed due to internal error")
-          }
-        }
-      }
-    }
-  }
-
-  lazy val addPost = {
-    post_JsonRes {
-      path("user" / "[a-zA-Z0-9]*".r / "feed") { userId =>
-        //Verify the user. TODO        
-        entity(as[UserPost]) { postjson =>
+    jsonRes {
+      get {
+        path("profile" / "[a-zA-Z0-9]*".r) { userId =>
           complete {
-            val f = Await.result(FBServers ? buildaddPost(userId, postjson), timeout.duration)
-            if (f.isInstanceOf[PostAdded]) {
-              f.asInstanceOf[PostAdded]
+            val f = Await.result(FBServers ? findProfile(userId), timeout.duration)
+            if (f.isInstanceOf[User]) {
+              f.asInstanceOf[User]
             } else if (f.isInstanceOf[Error]) {
               f.asInstanceOf[Error]
             } else {
@@ -150,6 +131,29 @@ object FacebookServer extends App with SimpleRoutingApp {
           }
         }
       }
+    }
+  }
+
+  lazy val addPost = {
+    jsonRes {
+      path("user" / "[a-zA-Z0-9]*".r / "feed") { userId =>
+        put {
+          //Verify the user. TODO        
+          entity(as[UserPost]) { postjson =>
+            complete {
+              val f = Await.result(FBServers ? buildaddPost(userId, postjson), timeout.duration)
+              if (f.isInstanceOf[PostAdded]) {
+                f.asInstanceOf[PostAdded]
+              } else if (f.isInstanceOf[Error]) {
+                f.asInstanceOf[Error]
+              } else {
+                Error("Failed due to internal error")
+              }
+            }
+          }
+        }
+      }
+
     }
   }
 
@@ -205,36 +209,15 @@ object FacebookServer extends App with SimpleRoutingApp {
     }
   }
 
-  lazy val createAlbum = {
+  lazy val album = {
     jsonRes {
-      put {
-        //have to pass json but the concept remains the same. albumid = albumname
-        path("user" / "[a-zA-Z0-9]*".r / "albums" / "create") { (userId) =>
-          entity(as[Album]) { album =>
+      path("user" / "[a-zA-Z0-9]*".r / "albums") { (userId) =>
+        get {
+          parameters("frndId") { (frndId) =>
             complete {
-              if (userId.equals(album.userId)) {
-                var f = Await.result(FBServers ? album, timeout.duration)
-                if (f.isInstanceOf[Success]) {
-                  f.asInstanceOf[Success]
-                } else if (f.isInstanceOf[Error]) {
-                  f.asInstanceOf[Error]
-                } else {
-                  Error("Failed due to internal error")
-                }
-              } else {
-                Error(Constants.messages.noPermission)
-              }
-            }
-          }
-        }
-      } ~
-        delete {
-          path("user" / "[a-zA-Z0-9]*".r / "albums" / "delete" / "[a-zA-Z0-9]*".r) { (userId, albumId) =>
-            complete {
-              //no check for userid 
-              var f = Await.result(FBServers ? deleteAlbum(userId, albumId), timeout.duration)
-              if (f.isInstanceOf[Success]) {
-                f.asInstanceOf[Success]
+              var f = Await.result(FBServers ? getUserAlbums(userId, frndId), timeout.duration)
+              if (f.isInstanceOf[Array[Album]]) {
+                f.asInstanceOf[Array[Album]]
               } else if (f.isInstanceOf[Error]) {
                 f.asInstanceOf[Error]
               } else {
@@ -243,8 +226,41 @@ object FacebookServer extends App with SimpleRoutingApp {
             }
           }
         } ~
-        post {
-          path("user" / "[a-zA-Z0-9]*".r / "albums" / "update") { (userId) =>
+          put {
+            //have to pass json but the concept remains the same. albumid = albumname
+            entity(as[Album]) { album =>
+              complete {
+                if (userId.equals(album.userId)) {
+                  var f = Await.result(FBServers ? album, timeout.duration)
+                  if (f.isInstanceOf[Success]) {
+                    f.asInstanceOf[Success]
+                  } else if (f.isInstanceOf[Error]) {
+                    f.asInstanceOf[Error]
+                  } else {
+                    Error("Failed due to internal error")
+                  }
+                } else {
+                  Error(Constants.messages.noPermission)
+                }
+              }
+            }
+          } ~
+          delete {
+            parameters("albumId") { albumId =>
+              complete {
+                //no check for userid 
+                var f = Await.result(FBServers ? deleteAlbum(userId, albumId), timeout.duration)
+                if (f.isInstanceOf[Success]) {
+                  f.asInstanceOf[Success]
+                } else if (f.isInstanceOf[Error]) {
+                  f.asInstanceOf[Error]
+                } else {
+                  Error("Failed due to internal error")
+                }
+              }
+            }
+          } ~
+          post {
             entity(as[Album]) { album =>
               complete {
                 if (userId.equals(album.userId)) {
@@ -262,27 +278,6 @@ object FacebookServer extends App with SimpleRoutingApp {
               }
             }
           }
-        }
-    }
-  }
-
-  lazy val getAlbumInfo = {
-    jsonRes {
-      path("user" / "[a-zA-Z0-9]*".r / "albums") { userId =>
-        get {
-          parameters("frndId"?) { frndId =>
-            complete {
-              var f = Await.result(FBServers ? getUserAlbums(userId, frndId), timeout.duration)
-              if (f.isInstanceOf[Array[Album]]) {
-                f.asInstanceOf[Array[Album]]
-              } else if (f.isInstanceOf[Error]) {
-                f.asInstanceOf[Error]
-              } else {
-                Error("Failed due to internal error")
-              }
-            }
-          }
-        }
       }
     }
   }
@@ -352,7 +347,7 @@ object FacebookServer extends App with SimpleRoutingApp {
           sender ! Success(Constants.messages.created + userId)
         } else {
           var user = userbase.get(userId)
-          user.get.insertData(u.age, u.firstName, u.lastName, u.gender)
+          user.get.insertData(u.age, u.firstName, u.lastName, u.gender, u.relation)
           sender ! Success(userId + Constants.messages.updated)
         }
       }
@@ -370,7 +365,7 @@ object FacebookServer extends App with SimpleRoutingApp {
             if (!frndId.isEmpty() && userId != frndId && userbase.contains(frndId)) {
               user.get.addFriend(frndId)
               var frnd = userbase.get(frndId)
-              frnd.get.addFriend(frndId)
+              frnd.get.addFriend(userId)
             }
             newIds = newIds :+ frndId
           }
@@ -421,8 +416,9 @@ object FacebookServer extends App with SimpleRoutingApp {
       }
 
       case gfl: getFriendsList => {
-        var user = userbase.get(gfl.userId)
 
+        var user = userbase.get(gfl.userId)
+        log.debug(gfl.userId + " requested list of  " + gfl.frndId + " and his friends are " + user.get.getFriendList().toList.toString())
         if (user.isEmpty) {
           sender ! Error(Constants.messages.noUser)
         } else {
@@ -447,18 +443,30 @@ object FacebookServer extends App with SimpleRoutingApp {
 
       case aa: Album => {
         var user = userbase.get(aa.userId)
+
+        var isSuccess = false;
+
         if (user.isEmpty) {
           sender ! Error(Constants.messages.noUser)
-        } else if (user.get.getUserAlbumsIds(aa.userId).contains(aa.albumId)) {
-          sender
         } else {
-          var isSuccess = user.get.addAlbumToUser(aa.userId, aa);
-          if (isSuccess) {
-            //  Add this album permission to friends TODO
-            sender ! Success(Constants.messages.albumCreated + aa.albumId)
+          if (user.get.getUserAlbumsIds(aa.userId).contains(aa.albumId)) {
+            isSuccess = user.get.updateAlbumToUser(aa.userId, aa)
+            if (isSuccess) {
+              //  Add this album permission to friends TODO
+              sender ! Success(Constants.messages.albumUpdated + aa.albumId)
+            } else {
+              sender ! Error(Constants.messages.noAlbum)
+            }
           } else {
-            sender ! Error(Constants.messages.albumCreationFailed)
+            isSuccess = user.get.addAlbumToUser(aa.userId, aa);
+            if (isSuccess) {
+              //  Add this album permission to friends TODO
+              sender ! Success(Constants.messages.albumCreated + aa.albumId)
+            } else {
+              sender ! Error(Constants.messages.albumCreationFailed)
+            }
           }
+
         }
       }
 
@@ -477,9 +485,9 @@ object FacebookServer extends App with SimpleRoutingApp {
           sender ! Error(Constants.messages.noUser)
         } else {
           if (gai.userId.equals(gai.frndId)) {
-            sender ! user.get.getUserAlbums(gai.userId)
-          } else if (!gai.frndId.isEmpty && userbase.contains(gai.frndId.get)) {
-            sender ! user.get.getUserAlbums(gai.frndId.get)
+            sender ! user.get.getUserAlbums()
+          } else if (userbase.contains(gai.frndId)) {
+            sender ! userbase.get(gai.frndId).get.getUserAlbums()
           }
         }
       }
@@ -491,7 +499,18 @@ object FacebookServer extends App with SimpleRoutingApp {
         } else {
           var isSuccess = user.get.addPhotoToAlbum(ai.userId, ai.albumId, ai)
           if (isSuccess) {
-            //  Add this photo permission to friends TODO
+            var p = UserPost(ai.userId, ai.src, ai.message, ai.place, Constants.Privacy.Friends, Some(ai.photoId), Option(Constants.PostTypes.Photo))
+            user.get.addToFeed(ai.photoId, p)
+            if (!ai.noStory) {
+              // If this is a personal post. Just add to the feed of the user. 
+              // Else Add this photo permission to friends 
+              var it = user.get.getFriendList().iterator
+              while (it.hasNext) {
+                var friendId = it.next()
+                var friend = userbase.get(friendId)
+                friend.get.addToFeed(ai.photoId, p)
+              }
+            }
             sender ! Success(Constants.messages.photoAdded + ai.photoId)
           } else {
             sender ! Error(Constants.messages.photoAddFailed)
@@ -503,13 +522,13 @@ object FacebookServer extends App with SimpleRoutingApp {
     //Helper methods
     def createUserWithID(u: User): UserInfo = {
       var user = new UserInfo(u.userId);
-      user.insertData(u.age, u.firstName, u.lastName, u.gender)
+      user.insertData(u.age, u.firstName, u.lastName, u.gender, u.relation)
       user
     }
 
   }
 
-  class UserInfo(val userid: String, var age: Int = -1, var firstName: String = "", var lastName: String = "", var gender: String = "NA") {
+  class UserInfo(val userId: String, var age: Int = -1, var firstName: String = "", var lastName: String = "", var gender: String = "NA", var relation: String = "") {
 
     /**
      * Listbuffer internally uses list
@@ -525,33 +544,37 @@ object FacebookServer extends App with SimpleRoutingApp {
 
     var posts = new ListBuffer[UserPost]()
     var friendList = new ListBuffer[String]()
-    val log = Logger(LoggerFactory.getLogger("UserInfo"))
+    val log = Logger(LoggerFactory.getLogger("UserInfo-" + userId))
 
     private var userAlbums = new ListBuffer[String]
     private var albumStore = new HashMap[String, PictureAlbum]
     private var photoStore = new HashMap[String, Picture]
 
-    def insertData(a: Int, fn: String, ln: String, gen: String) {
+    def insertData(a: Int, fn: String, ln: String, gen: String, rel: String) {
       age = a
       firstName = fn
       lastName = ln
       gender = gen
+      relation = rel
     }
 
     def addToFeed(postId: String, post: UserPost) = {
+      log.debug(userId + " addToFeed " + post + posts.length)
       posts.prepend(post)
     }
 
     def getPosts(): UserPage = {
+      log.debug(userId + " getPosts " + posts.length)
       return UserPage(posts.toList.toArray)
     }
 
     def addFriend(friendId: String) = {
+      log.debug(userId + " addFriend " + friendId)
       friendList.append(friendId)
     }
 
     def getPublicProfile(): User = {
-      User(userid, firstName, lastName, age, gender);
+      User(userId, firstName, lastName, age, gender, relation);
     }
 
     def getFriendList(): ListBuffer[String] = {
@@ -566,6 +589,7 @@ object FacebookServer extends App with SimpleRoutingApp {
       } else {
         userAlbums.append(album.albumId);
         var picAlbum = new PictureAlbum(userId, album.albumId)
+        picAlbum.populate(album.coverPhoto, album.description, album.place)
         albumStore.put(album.albumId, picAlbum)
         true
       }
@@ -598,13 +622,13 @@ object FacebookServer extends App with SimpleRoutingApp {
       // Need not check userId, albumId. Higher level check
       if (photoStore.get(photo.photoId) == null) {
         if (albumStore.get(albumId) == null) {
-          //TODO return error, should not happen
+          // return error, should not happen
           log.error("Album not found")
           false
         } else {
           // When security is implemented, content will be encrypted so it doesn't not matter to validate.
           var album: PictureAlbum = albumStore.get(albumId)
-          var pic = new Picture(userId, albumId, photo.src);
+          var pic = new Picture(albumId, photo.photoId, photo.src);
           pic.populate(photo.message, photo.place)
           album.addPicture(pic)
           photoStore.put(pic.photoId, pic)
@@ -627,7 +651,7 @@ object FacebookServer extends App with SimpleRoutingApp {
       b
     }
 
-    def getUserAlbums(userId: String): Array[Album] = {
+    def getUserAlbums(): Array[Album] = {
       var a = userAlbums;
       var it = a.iterator
       var albums = Array[Album]()

@@ -24,24 +24,37 @@ object Constants {
     val Private = "personal"
   }
 
+  object PostTypes {
+    val Default = "Default"
+    val Photo = "Photo"
+    val ProfileUpdate = "ProfileUpdate"
+  }
+
   object messages {
     val success = "OK! Successfully completed"
     val created = "OK! user created successfully "
     val photoAdded = "OK! Successfully added the photo to user profile"
     val albumCreated = "OK! Album successfully created."
-    val updated = "details successfully updated"
-    
+    val albumUpdated = "OK! Album updated successfully."
+    val updated = "OK! details successfully updated"
+
     val noUser = "User does not exist!!"
+    val noAlbum = "User does not have such an album!!"
     val noPermission = "You dont have permission to perform this operation"
     val userAlreadyPresent = "Username already exists"
     val albumCreationFailed = "Album creation failed"
     val photoAddFailed = "Photo addition to user album failed"
   }
 
-  val places = Array[String]("Colorado" , "Sweden" , "Mumbai" , "Romania" , "Italy" , "Paris")
-  
+  val places = Array[String]("Colorado", "Sweden", "Mumbai", "Romania", "Italy", "Paris")
+
   val prefix = "src\\main\\resources\\"
   val images = Array[String](prefix + "Hello.jpg", prefix + "Secure.jpg", prefix + "World.jpg")
+}
+
+object Relation extends Enumeration {
+  type Relation = Value
+  val Single, InARelation = Value
 }
 
 object Gender extends Enumeration {
@@ -59,10 +72,10 @@ object UserLoginJsonSupport extends DefaultJsonProtocol with SprayJsonSupport {
 //JSON Types
 //found : Any required: spray.httpx.marshalling.ToResponseMarshallable
 
-case class User(userId: String, firstName: String, lastName: String, age: Int, gender: String)
+case class User(userId: String, firstName: String, lastName: String, age: Int, gender: String, relation: String)
 case class FriendRequest(userId: String, frndId: String)
 case class UsersList(userIds: Array[String])
-case class UserPost(message: String, link: Option[String] = None, place: Option[String] = None, privacy: String, object_attachment: Option[String] = None)
+case class UserPost(postby : String, message: String, link: Option[String] = None, place: Option[String] = None, privacy: String, object_attachment: Option[String] = None, Type: Option[String] = Option(Constants.PostTypes.Default))
 case class PostAdded(uuid: String, message: String)
 case class UserPage(posts: Array[UserPost])
 case class Album(userId: String, albumId: String, coverPhoto: Option[String] = None, createdTime: Option[String] = None, description: Option[String] = None, place: Option[String] = None, updateTime: Option[String] = None, var photos: Option[Array[String]] = None)
@@ -77,8 +90,8 @@ object jsonProtocol extends DefaultJsonProtocol with SprayJsonSupport with NullO
     def read(value: JsValue) = UsersList(value.convertTo[Array[String]])
     def write(f: UsersList) = f.userIds.toJson
   }
-  implicit val UserFormat = jsonFormat5(User)
-  implicit val postFormat = jsonFormat5(UserPost)
+  implicit val UserFormat = jsonFormat6(User)
+  implicit val postFormat = jsonFormat7(UserPost)
   implicit val postAddedFormat = jsonFormat2(PostAdded)
   implicit object postList extends RootJsonFormat[UserPage] {
     def read(value: JsValue) = UserPage(value.convertTo[Array[UserPost]])
@@ -93,12 +106,11 @@ object jsonProtocol extends DefaultJsonProtocol with SprayJsonSupport with NullO
 
 case class findProfile(userId: String)
 case class addPost(postId: String, userId: String, post: UserPost) //extends Seal
-case class addFriend(userId: String)
 case class getUserPage(userId: String)
 case class getFriendsList(userId: String, frndId: String)
 case class deleteAlbum(userId: String, albumId: String)
 case class getPhotos(userId: String)
-case class getUserAlbums(userId: String, frndId: Option[String])
+case class getUserAlbums(userId: String, frndId: String)
 case class systemSetup()
 
 class PictureAlbum(val ownerId: String, val albumId: String) {
@@ -116,9 +128,8 @@ class PictureAlbum(val ownerId: String, val albumId: String) {
     place = pplace
     createdTime = System.currentTimeMillis().toString()
     updateTime = System.currentTimeMillis().toString()
-    photos = new ListBuffer[String]
   }
-  
+
   def update(pcoverPhoto: Option[String] = None, pdescription: Option[String] = None, pplace: Option[String] = None) {
     coverPhoto = pcoverPhoto
     description = pdescription

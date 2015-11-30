@@ -58,17 +58,24 @@ object FacebookSimulator {
 
   val userPrefix = "user"
   val totalUsers = Constants.totalUsers
-  val activeUsers = (2 / 3) * totalUsers
-  val posts = (3 / 5) * activeUsers
+  println("tu" + totalUsers)
+  val activeUsers = ((2 * totalUsers) / 3)
+  println("au" + activeUsers)
+  val posts = ((3 * activeUsers) / 5)
+  println("po" + posts)
   val newuser = if (totalUsers * 0.000005 < 1) 1 else totalUsers * 0.000005
-  val scPostTime = (60 * 60) / posts
+  println("nu" + newuser)
+  val scPostTime = ((60 * 60) / posts) + 0.1
+
+  println("tu" + totalUsers)
   val scAlbumTime = 10 * scPostTime
-  val scPhotoTime = 5 * scPostTime
+  val scPhotoTime = 2 * scPostTime
+
   val scNewUser = 60 / newuser
   val scFrndReq = 60
   val scView = 0.01
-  val postUserPer = 25 / 100 * (activeUsers)
-  val postPhotoPer = 40 / 100 * (activeUsers)
+  val postUserPer = (25 * activeUsers) / 100
+  val postPhotoPer = (40 * activeUsers) / 100
   val viewPer = totalUsers
 
   def main(args: Array[String]) {
@@ -106,8 +113,8 @@ object FacebookSimulator {
 
     var firstTime = true;
 
-    var userName = userPrefix + (Random.nextInt(Constants.totalUsers) + 1)
-    var frndName = userPrefix + (Random.nextInt(Constants.totalUsers) + 1)
+    var userName = userPrefix + 4
+    var frndName = userPrefix + 7
     val sleepdelay = 1000
 
     // Sanity Check
@@ -118,41 +125,51 @@ object FacebookSimulator {
       var frnd = system.actorSelection(namingPrefix + frndName)
 
       if (firstTime) {
-        user ? addFriend(frndName)
+        user ? FriendRequest(userName, frndName)
         firstTime = false
       }
 
       println("UserPost >> ")
 
-      user ? UserPost("post by " + userName, None, None, Privacy.Friends, None); Thread.sleep(sleepdelay)
-      frnd ? UserPost("post by " + frndName, None, None, Privacy.Friends, None); Thread.sleep(sleepdelay)
+      user ? UserPost(userName, "post by " + userName, Option("google1"), Option("Paris"), Privacy.Friends, Some("uuid")); Thread.sleep(sleepdelay)
+      frnd ? UserPost(frndName, "post by " + frndName, Option("google2"), Option("London"), Privacy.Friends, Some("uuid")); Thread.sleep(sleepdelay)
+
+      println("get profile >> ")
+
+      user ? getProfile(frndName); Thread.sleep(sleepdelay)
+      frnd ? getProfile(userName); Thread.sleep(sleepdelay)
+
+      println("get page >> ")
+
+      user ? getPage(); Thread.sleep(sleepdelay)
+      frnd ? getPage(); Thread.sleep(sleepdelay)
+
+      println("get friends list>> ")
+
+      user ? getFriendsList(userName, frndName); Thread.sleep(sleepdelay)
+      frnd ? getFriendsList(frndName, userName); Thread.sleep(sleepdelay)
+
+      println("get album info>> ")
+
+      user ? getUserAlbums(userName, userName); Thread.sleep(sleepdelay)
+      frnd ? getUserAlbums(frndName, frndName); Thread.sleep(sleepdelay)
+
+      println("get frnd album info>> ")
+
+      user ? getUserAlbums(userName, frndName); Thread.sleep(sleepdelay)
+      frnd ? getUserAlbums(frndName, userName); Thread.sleep(sleepdelay)
+
+      println("addDynamicAlbumAndPhoto>> ")
+
+      user ? addDynamicAlbumAndPhoto()
+
+      println("addPhotoToExistingAlbum>> ")
+      user ? addPhotoToExistingAlbum()
       if (false) {
-        println("get profile >> ")
-
-        user ? getProfile(frndName); Thread.sleep(sleepdelay)
-        frnd ? getProfile(userName); Thread.sleep(sleepdelay)
-
-        println("get page >> ")
-
-        user ? getPage(); Thread.sleep(sleepdelay)
-        frnd ? getPage(); Thread.sleep(sleepdelay)
-
-        println("get friends list>> ")
-
-        user ? getFriendsList(userName, frndName); Thread.sleep(sleepdelay)
-        frnd ? getFriendsList(frndName, userName); Thread.sleep(sleepdelay)
-
-        println("get album info>> ")
-
-        user ? getUserAlbums(userName, Some(frndName)); Thread.sleep(sleepdelay)
-        frnd ? getUserAlbums(frndName, Some(userName)); Thread.sleep(sleepdelay)
-
       }
       Thread.sleep(10000)
     }
-
     startSchedulers()
-
   }
 
   var createdUsers = new AtomicInteger(0);
@@ -165,7 +182,7 @@ object FacebookSimulator {
     for (i <- 0 until Constants.totalUsers) {
       var userId = userPrefix + i
       var user = system.actorOf(Props(new UserClient(userId)), userId)
-      var u = new User(userId, "First-" + userId, "Last-" + userId, Random.nextInt(100) + 1, Gender.apply(Random.nextInt(Gender.maxId)).toString());
+      var u = new User(userId, "First-" + userId, "Last-" + userId, Random.nextInt(100) + 1, Gender.apply(Random.nextInt(Gender.maxId)).toString(), Relation.Single.toString());
       user ! u
     }
   }
@@ -174,7 +191,7 @@ object FacebookSimulator {
 
     println("Per user frnds : " + Constants.numOfFriends)
 
-    for (i <- 0 to Constants.totalUsers) {
+    for (i <- 0 until Constants.totalUsers) {
       var userId = userPrefix + i
       var user = system.actorSelection(namingPrefix + userId)
 
@@ -195,7 +212,7 @@ object FacebookSimulator {
   }
 
   def createAlbums(): Unit = {
-    for (i <- 0 to Constants.totalUsers) {
+    for (i <- 0 until Constants.totalUsers) {
       var userId = userPrefix + i
       var user = system.actorSelection(namingPrefix + userId)
       user ! addDefaultAlbum()
@@ -203,7 +220,7 @@ object FacebookSimulator {
   }
 
   def createPhotos(): Unit = {
-    for (i <- 0 to Constants.totalUsers) {
+    for (i <- 0 until Constants.totalUsers) {
       var userId = userPrefix + i
       var user = system.actorSelection(namingPrefix + userId)
       user ! addDefaultImages()
@@ -214,19 +231,19 @@ object FacebookSimulator {
     import system.dispatcher
     var scpost: Cancellable = system.scheduler.schedule(FiniteDuration.apply(1, "seconds"), FiniteDuration.apply(scPostTime.toLong, "seconds"), (new Runnable {
       def run {
-        var userName = userPrefix + (Random.nextInt(postUserPer) + 1)
+        var userName = userPrefix + (Random.nextInt(postUserPer))
         println(userName + " scpost")
         var user = system.actorSelection(namingPrefix + userName)
-        user ! UserPost("post", None, None, Privacy.Friends, None)
+        user ! UserPost(userName, "post", None, None, Privacy.Friends, None)
       }
     }))
 
     var sccount = 1
 
-    var scalbum: Cancellable = system.scheduler.schedule(FiniteDuration.apply(1, "seconds"), FiniteDuration.apply(scPhotoTime.toLong, "seconds"), (new Runnable {
+    var scalbum: Cancellable = system.scheduler.schedule(FiniteDuration.apply(1, "seconds"), FiniteDuration.apply(scAlbumTime.toLong, "seconds"), (new Runnable {
       def run {
         sccount = sccount + 1
-        var r = Random.nextInt(postPhotoPer) + 1
+        var r = Random.nextInt(postPhotoPer)
         var userName = userPrefix + r
         println(userName + " scalbum")
         var user = system.actorSelection(namingPrefix + userName)
@@ -237,7 +254,7 @@ object FacebookSimulator {
     var scphoto: Cancellable = system.scheduler.schedule(FiniteDuration.apply(1, "seconds"), FiniteDuration.apply(scPhotoTime.toLong, "seconds"), (new Runnable {
       def run {
         sccount = sccount + 1
-        var r = Random.nextInt(postPhotoPer) + 1
+        var r = Random.nextInt(postPhotoPer)
         var userName = userPrefix + r
         println(userName + " scphoto")
         var user = system.actorSelection(namingPrefix + userName)
@@ -248,7 +265,7 @@ object FacebookSimulator {
     var scview: Cancellable = system.scheduler.schedule(FiniteDuration.apply(1, "seconds"), FiniteDuration.apply(scView.toLong, "seconds"), (new Runnable {
       def run {
         sccount = sccount + 1
-        var r = Random.nextInt(totalUsers) + 1
+        var r = Random.nextInt(totalUsers)
         var userName = userPrefix + r
         println(userName + " scview")
         var user = system.actorSelection(namingPrefix + userName)
@@ -262,11 +279,11 @@ object FacebookSimulator {
     var scfrndreq: Cancellable = system.scheduler.schedule(FiniteDuration.apply(5, "seconds"), FiniteDuration.apply(scFrndReq.toLong, "seconds"), (new Runnable {
       def run {
         sccount = sccount + 1
-        var r = Random.nextInt(Constants.totalUsers) + 1
+        var r = Random.nextInt(Constants.totalUsers)
         var userName = userPrefix + r
         println(userName + " scfrndreq")
         var user = system.actorSelection(namingPrefix + userName)
-        user ! addFriend(userPrefix + (Random.nextInt(Constants.totalUsers) + 1))
+        user ! FriendRequest(userName, userPrefix + (Random.nextInt(Constants.totalUsers)))
       }
     }))
 
@@ -276,7 +293,7 @@ object FacebookSimulator {
         var userName = userPrefix + usercount
         var user = system.actorOf(Props(new UserClient(userName)), userName)
         println(userName + " scnewuser")
-        var u = new User(userName, "First-" + userName, "Last-" + userName, Random.nextInt(100) + 1, Gender.apply(Random.nextInt(Gender.maxId)).toString());
+        var u = new User(userName, "First-" + userName, "Last-" + userName, Random.nextInt(100) + 1, Gender.apply(Random.nextInt(Gender.maxId)).toString(), Relation.Single.toString());
         user ! u
       }
     }))
@@ -294,7 +311,6 @@ object FacebookSimulator {
 
   case class getPage()
   case class getProfile(userId: String)
-  case class getFriendList(userId: String, frndId: String)
   case class addDefaultAlbum()
   case class addDynamicAlbumAndPhoto()
   case class addDefaultImages()
@@ -319,8 +335,9 @@ object FacebookSimulator {
           var lastName = u.lastName
           var age = u.age
           var gender = u.gender
+          var relation = u.relation
           log.debug("Creating user with id " + userId)
-          val result: Future[HttpResponse] = pipeline(Put(Constants.serverURL + "/createuser", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId", "firstName" : "$firstName" , "lastName" : "$lastName", "age" : $age , "gender" :  "$gender"}""")))
+          val result: Future[HttpResponse] = pipeline(Put(Constants.serverURL + "/user", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId", "firstName" : "$firstName" , "lastName" : "$lastName", "age" : $age , "gender" :  "$gender", "relation" :  "$relation"}""")))
           Await.result(result, timeout.duration)
           result.onComplete {
             x =>
@@ -335,7 +352,7 @@ object FacebookSimulator {
         var userId = rf.userId
         var frndIds = rf.frndId
         log.debug("Requesting user,frnd : " + userId + " , " + frndIds)
-        val result: Future[HttpResponse] = pipeline(Put(Constants.serverURL + "/user/" + userId + "/addfriend", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId" , "frndId" : "$frndIds" }""")))
+        val result: Future[HttpResponse] = pipeline(Post(Constants.serverURL + "/user/" + userId + "/addfriend", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId" , "frndId" : "$frndIds" }""")))
         Await.result(result, timeout.duration)
         result.onComplete {
           x =>
@@ -347,7 +364,14 @@ object FacebookSimulator {
       }
 
       case ap: UserPost => {
-        val result: Future[HttpResponse] = pipeline(Put(Constants.serverURL + "/user/" + userId + "/feed", HttpEntity(MediaTypes.`application/json`, s"""{"message": "$ap.message", "link": "$ap.link", "place": "$ap.place", "privacy": "$ap.privacy", "object_attachment": "$ap.object_attachment"}""")))
+        var message = ap.message;
+        var link = ap.link;
+        var object_attachment = ap.object_attachment;
+        var place = ap.place;
+        var privacy = ap.privacy;
+        var postBy = ap.postby;
+
+        val result: Future[HttpResponse] = pipeline(Put(Constants.serverURL + "/user/" + userId + "/feed", HttpEntity(MediaTypes.`application/json`, s"""{"postby": "$postBy", "message": "$message", "link": "$link", "place": "$place", "privacy": "$privacy", "object_attachment": "$object_attachment"}""")))
         Await.result(result, timeout.duration)
         result.onComplete {
           x =>
@@ -379,7 +403,7 @@ object FacebookSimulator {
         }
       }
 
-      case gfl: getFriendList => {
+      case gfl: getFriendsList => {
         var userID = gfl.userId
         var frndId = gfl.frndId
         val result: Future[HttpResponse] = pipeline(Get(Constants.serverURL + "/user/" + userID + "/friendslist/" + frndId))
@@ -400,14 +424,6 @@ object FacebookSimulator {
               albumsAdded.incrementAndGet()
               x.foreach { res => log.debug(res.entity.asString) }
             }
-        }
-      }
-
-      case a: Album => {
-        var result = addAlbum(a)
-        result.foreach {
-          response =>
-            log.info(s"added album:\n${response.entity.asString}")
         }
       }
 
@@ -446,9 +462,11 @@ object FacebookSimulator {
 
       case p: addPhotoToExistingAlbum => {
 
-        var albums = getUserAlbums()
+        var albums = getUserAlbums(userId)
+        //var albumId = albums(Random.nextInt(albums.length)).albumId
+        var albumId = userId + "-defaultalbum"
         var photoId = userId + UUID.randomUUID();
-        var p = Photo(userId, albums(Random.nextInt(albums.length)).albumId, photoId, readImage(), Some("Dynamic image to existing album " + photoId), Option(Constants.places(Random.nextInt(Constants.places.length))), false)
+        var p = Photo(userId, albumId, photoId, readImage(), Some("Dynamic image to existing album " + photoId), Option(Constants.places(Random.nextInt(Constants.places.length))), false)
         var result = addImage(p)
         Await.result(result, timeout.duration)
         result.onComplete { x =>
@@ -459,24 +477,21 @@ object FacebookSimulator {
         }
       }
 
-      case p: Photo => {
-        var result = addImage(p)
-        result.foreach {
-          response =>
-            log.debug(s"Photo added:\n${response.entity.asString}")
-        }
+      case a: getUserAlbums => {
+        getUserAlbums(a.frndId)
       }
 
     }
 
-    def getUserAlbums(): Array[Album] = {
-      val result: Future[HttpResponse] = pipeline(Get(Constants.serverURL + "/albums/" + userId))
+    def getUserAlbums(frndId: String): Array[Album] = {
+      val result: Future[HttpResponse] = pipeline(Get(Constants.serverURL + "/user/" + userId + "/albums" + "?frndId=" + frndId))
       Await.result(result, timeout.duration)
       result.onComplete {
         x =>
           {
-            x.foreach { res => log.debug(res.entity.asString) }
-            x.asInstanceOf[Array[Album]]
+            x.foreach { res =>
+              log.debug(res.entity.asString)
+            }
           }
       }
       null
@@ -485,26 +500,24 @@ object FacebookSimulator {
     def addAlbum(a: Album): Future[HttpResponse] = {
       var userId = a.userId
       var albumId = a.albumId
-      var coverPhoto = a.coverPhoto
-      var createdTime = a.createdTime
-      var description = a.description
-      var place = a.place
-      var updateTime = a.updateTime
-      var photos = a.photos
-      log.info(photos.mkString(","))
-      var photostring = a.photos.mkString(",")
-      pipeline(Post(Constants.serverURL + "/user/" + userId + "/albums/create", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId", "albumId" :"$albumId", "coverPhoto" : "$coverPhoto", "createdTime" : "$createdTime", "description" : "$description", "place":"$place", "updateTime" :"$updateTime", "photos" : [""]}""")))
+      var coverPhoto = if (a.coverPhoto.isDefined) a.coverPhoto.get else ""
+      var createdTime = if (a.createdTime.isDefined) a.createdTime.get else ""
+      var description = if (a.description.isDefined) a.description.get else ""
+      var place = if (a.place.isDefined) a.place.get else ""
+      var updateTime = if (a.updateTime.isDefined) a.updateTime.get else ""
+      pipeline(Put(Constants.serverURL + "/user/" + userId + "/albums", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId", "albumId" :"$albumId", "coverPhoto" : "$coverPhoto", "createdTime" : "$createdTime", "description" : "$description", "place":"$place", "updateTime" :"$updateTime"}""")))
     }
 
     def addImage(p: Photo): Future[HttpResponse] = {
       var userId = p.userId
       var albumId = p.albumId
-      var message = p.message
-      var noStory = p.noStory
       var photoId = p.photoId
-      var place = p.place
       var src = p.src
-      pipeline(Post(Constants.serverURL + "/user/" + userId + "/albums/photo", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId", "albumId" : "$albumId", "place": "$place","photoId": "$photoId", "src": "$src", "message": "$message", "noStory": $noStory}""")))
+      var noStory = p.noStory
+      var message = if (p.message.isDefined) p.message.get else ""
+      var place = if (p.place.isDefined) p.place.get else ""
+
+      pipeline(Put(Constants.serverURL + "/user/" + userId + "/albums/photo", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId", "albumId" : "$albumId", "place": "$place","photoId": "$photoId", "src": "$src", "message": "$message", "noStory": $noStory}""")))
     }
 
     //Image content will be encrypted and server does not know how to decrypt  
