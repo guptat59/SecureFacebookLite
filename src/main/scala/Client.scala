@@ -1,196 +1,401 @@
 import scala.concurrent.Future
+import scala.concurrent.duration.FiniteDuration
+import scala.util.Random
+import com.typesafe.config.ConfigFactory
+import Constants.Privacy
 import akka.actor.Actor
+import akka.actor.ActorLogging
+import akka.actor.ActorSelection.toScala
 import akka.actor.ActorSystem
+import akka.actor.Cancellable
 import akka.actor.Props
 import akka.actor.actorRef2Scala
+import akka.pattern.ask
+import akka.util.Timeout
 import spray.client.pipelining.Get
 import spray.client.pipelining.Post
 import spray.client.pipelining.sendReceive
-import spray.client.pipelining.sendReceive$default$3
 import spray.http.ContentType.apply
 import spray.http.HttpEntity
 import spray.http.HttpResponse
 import spray.http.MediaTypes
 import spray.httpx.SprayJsonSupport
 import spray.json.AdditionalFormats
-import java.util.Arrays.ArrayList
-import akka.actor.ActorRef
+import java.nio.file.Paths
+import java.nio.file.Files
+import org.apache.commons.codec.binary.Base64
+import java.util.concurrent.atomic.AtomicInteger
+import spray.json.DefaultJsonProtocol
+import spray.httpx.SprayJsonSupport
+import spray.json.DefaultJsonProtocol
+import spray.json.JsValue
+import spray.json.JsonFormat
+import spray.json.NullOptions
+import spray.json.RootJsonFormat
+import spray.json.pimpAny
+import java.util.HashMap
+import spray.json.AdditionalFormats
+import spray.httpx.RequestBuilding._
+import spray.http._
+import HttpMethods._
+import HttpHeaders._
+import ContentTypes._
+import scala.concurrent.Await
 
-object client {
-  
-  var numOfUsers = 100
-  var numOfActiveUsers = (numOfUsers) * 30/100
-  var numOfPassiveUsers = (numOfUsers) * 70/100
-  var userList = new java.util.ArrayList[String]
-  var activeUserList = new java.util.ArrayList[String]
-  var passiveUserList = new java.util.ArrayList[String]
+object FacebookSimulator {
+
   var namingPrefix = "akka://" + "FBClients" + "/user/"
-  
-  def main(args: Array[String]){
-    if(args.length > 0)
-    {
-     numOfUsers = args(0).toInt
-    }
+  val actorConf = """
+  akka {
+    #log-config-on-start = on
+    stdout-loglevel = "DEBUG"
+    loglevel = "DEBUG"    
+  }
+  """
+  val system = ActorSystem("FBClients", ConfigFactory.parseString(actorConf))
+  implicit val timeout = Timeout(1)
+
+  val userPrefix = "user"
+
+  def main(args: Array[String]) {
     //create 100 users
     //add 10 friends to each user
     //20-30% users post/add photo/album
     //70% gets friendslist/page of friends/profile of friends/photos/albums
     //user should request for 
     //FBServer.
-    val system = ActorSystem("FBClients")
-    //for loop for 100 actors
-    println("adding users")
-    var userName = "user333"
-    var user1 = system.actorOf(Props(new UserClient(userName)),userName)
-    var userName1 = "user443"
-    var user2 = system.actorOf(Props(new UserClient(userName1)),userName1)
-    user1 ! addUser()
-   // user2 ! addUser()
-    Thread.sleep(100)
-    /*user1 ! getProfile(userName)
-    user2 ! getProfile(userName1)
-    user1 ! addFriend(userName1)
-    Thread.sleep(100)
-    user1 ! addPost("post","","","friends","")
-    Thread.sleep(100)
-    user1 ! getProfile(userName1)
-    Thread.sleep(100)
-    user1 ! getFriendList("user1","user2") //resource not found
-    Thread.sleep(100)
-    user2 ! getPage()*/
-    user1 ! addAlbum(new Album(userName,userName+"album1",None,None,None,None,None,Array("photo1", "photo2", "photo3")))
-    user2 ! addAlbum(new Album(userName1,userName1+"album1",None,None,None,None,None,Array("photo1", "photo2", "photo3")))
-    user1 ! addPhoto(new Photo(userName,userName+"album1","photo","fb",None,None,true))
-    user1 ! getAlbumsInfo()
-    //user1 ! getPage()
-    /*for(i <- 1 to numOfUsers)
-    {
-      
-    }*/
+    //1.5billion users
+    //1 billion active users
+    //600 million posts
+    //300 million photos
+
+    createUsers()
+
+    while (createdUsers.get() < Constants.totalUsers) {
+      Thread.sleep(1000)
+      println("Waiting till all the users have booted up!! : " + createdUsers.get())
+    }
+
+    Thread.sleep(1000)
+    makeFriends()
+
+    while (frndsAdded.get() < Constants.totalUsers) {
+      Thread.sleep(1000)
+      println("Waiting till all the users have made some friends!! : " + frndsAdded.get())
+    }
+
+    Thread.sleep(1000)
+
+    var firstTime = true;
+
+    var userName = userPrefix + (Random.nextInt(Constants.totalUsers) + 1)
+    var frndName = userPrefix + (Random.nextInt(Constants.totalUsers) + 1)
+    val sleepdelay = 1000
+
+    // Sanity Check
+    while (true) {
+      Thread.sleep(5000)
+      println("##########################################################################################################")
+      var user = system.actorSelection(namingPrefix + userName)
+      var frnd = system.actorSelection(namingPrefix + frndName)
+
+      if (firstTime) {
+        user ? addFriend(frndName)
+        firstTime = false
+      }
+
+      println("UserPost >> ")
+
+      user ? UserPost("post by " + userName, None, None, Privacy.Friends, None); Thread.sleep(sleepdelay)
+      frnd ? UserPost("post by " + frndName, None, None, Privacy.Friends, None); Thread.sleep(sleepdelay)
+      if (false) {
+        println("get profile >> ")
+
+        user ? getProfile(frndName); Thread.sleep(sleepdelay)
+        frnd ? getProfile(userName); Thread.sleep(sleepdelay)
+
+        println("get page >> ")
+
+        user ? getPage(); Thread.sleep(sleepdelay)
+        frnd ? getPage(); Thread.sleep(sleepdelay)
+
+        println("get friends list>> ")
+
+        user ? getFriendsList(userName, frndName); Thread.sleep(sleepdelay)
+        frnd ? getFriendsList(frndName, userName); Thread.sleep(sleepdelay)
+
+        println("get album info>> ")
+
+        user ? getAlbumsInfo(); Thread.sleep(sleepdelay)
+        frnd ? getAlbumsInfo(); Thread.sleep(sleepdelay)
+
+      }
+      Thread.sleep(10000)
+    }
+
+    startSchedulers()
+
   }
+
+  var createdUsers = new AtomicInteger(0);
+  var frndsAdded = new AtomicInteger(0);
+
+  def createUsers(): Unit = {
+
+    for (i <- 0 to Constants.totalUsers) {
+      var userId = userPrefix + i
+      var user = system.actorOf(Props(new UserClient(userId)), userId)
+      var u = new User(userId, "First-" + userId, "Last-" + userId, Random.nextInt(100) + 1, Gender.apply(Random.nextInt(Gender.maxId)).toString());
+      user ! u
+    }
+  }
+
+  def makeFriends(): Unit = {
+
+    println("Per user frnds : " + Constants.numOfFriends)
+
+    for (i <- 0 to Constants.totalUsers) {
+      var userId = userPrefix + i
+      var user = system.actorSelection(namingPrefix + userId)
+
+      var frndIds = Array[String]()
+
+      var frndCount = 1
+      while (frndCount < Constants.numOfFriends) {
+        var frndId = userPrefix + ((i + frndCount) % Constants.totalUsers)
+        frndIds = frndIds :+ frndId
+        frndCount = frndCount + 1
+      }
+      var fList = frndIds.mkString(",")
+      println("frndIds : " + frndIds.length + fList)
+
+      var fr = new FriendRequest(userId, fList);
+      user ! fr
+    }
+  }
+
+  def startSchedulers(): Unit = {
+    import system.dispatcher
+
+    var postGenerator: Cancellable = system.scheduler.schedule(FiniteDuration.apply(1.toLong, "seconds"), FiniteDuration.apply(.1.toLong, "seconds"), (new Runnable {
+      def run {
+        var userName = userPrefix + (Random.nextInt((Constants.totalUsers * 10) / 100) + 1)
+        println(userName + " scheduler1")
+        var user = system.actorSelection(namingPrefix + userName)
+        user ! UserPost("post", None, None, Privacy.Friends, None)
+      }
+    }))
+
+    var albumGenerator: Cancellable = system.scheduler.schedule(FiniteDuration.apply(1.toLong, "seconds"), FiniteDuration.apply(.1.toLong, "seconds"), (new Runnable {
+      def run {
+        var userName = userPrefix + (Random.nextInt((Constants.totalUsers * 10) / 100) + 1)
+        println(userName + " scheduler1")
+        var user = system.actorSelection(namingPrefix + userName)
+        user ! UserPost("post", None, None, Privacy.Friends, None)
+      }
+    }))
+
+    var sccount = 1
+    var imageNAlbumGenerator: Cancellable = system.scheduler.schedule(FiniteDuration.apply(1, "seconds"), FiniteDuration.apply(.2.toLong, "seconds"), (new Runnable {
+      def run {
+        sccount = sccount + 1
+        var r = Random.nextInt((Constants.totalUsers * 20) / 100) + 1
+        var userName = userPrefix + r
+        println(userName + " scheduler2")
+        var user = system.actorSelection(namingPrefix + userName)
+        if (r % 2 == 0)
+          user ! new Album(userName, userName + "album" + sccount)
+        else
+          user ! new Photo(userName, userName + "album1", "uphoto" + sccount, "fb", None, None, true)
+      }
+    }))
+
+    var pageNProfileFetcher: Cancellable = system.scheduler.schedule(FiniteDuration.apply(1, "seconds"), FiniteDuration.apply(.001.toLong, "seconds"), (new Runnable {
+      def run {
+        sccount = sccount + 1
+        var r = Random.nextInt((Constants.totalUsers * 80) / 100) + 1 + (Constants.totalUsers * 20) / 100
+        var userName = userPrefix + r
+        println(userName + " scheduler3")
+        var user = system.actorSelection(namingPrefix + userName)
+        if (r % 2 == 0)
+          user ! getProfile(userPrefix + Random.nextInt(Constants.totalUsers))
+        else
+          user ! getPage()
+      }
+    }))
+
+    var friendRequester: Cancellable = system.scheduler.schedule(FiniteDuration.apply(1, "seconds"), FiniteDuration.apply(5.toLong, "seconds"), (new Runnable {
+      def run {
+        sccount = sccount + 1
+        var r = Random.nextInt(Constants.totalUsers) + 1
+        var userName = userPrefix + r
+        println(userName + " scheduler4")
+        var user = system.actorSelection(namingPrefix + userName)
+        user ! addFriend(userPrefix + (Random.nextInt(Constants.totalUsers) + 1))
+      }
+    }))
+
+    postGenerator.cancel()
+    imageNAlbumGenerator.cancel()
+    pageNProfileFetcher.cancel()
+    friendRequester.cancel()
+
+  }
+
   sealed trait seal
-  case class addUser()
-  case class addFriend(userName:String)
-  case class addPost(message: String, link: String, place:String, privacy: String, objtoattach: String)
+
   case class getPage()
-  case class getProfile(userName:String)
-  case class getFriendList(userName:String,frndName:String)
-  case class systemBoot()
-  case class addBulkUser(userName:String)
-  case class addAlbum(a:Album)
-  case class addPhoto(p:Photo)
+  case class getProfile(userId: String)
+  case class getFriendList(userId: String, frndId: String)
   case class getAlbumsInfo()
-  
-  class UserClient(user:String) extends Actor with SprayJsonSupport with AdditionalFormats{
-  implicit val system = context.system
-  import system.dispatcher
-  val pipeline = sendReceive  
-    def receive  = {
-      case sb: systemBoot => {
-        val result: Future[HttpResponse] =  pipeline(Post("http://localhost:8080/systemboot",HttpEntity(MediaTypes.`application/json`,s"""{"username": "$user"}""")))
-          result.foreach {
-        response =>
-          println(s"Created User:\n${response.entity.asString}")
+
+  class UserClient(userId: String) extends Actor with SprayJsonSupport with AdditionalFormats with ActorLogging {
+    implicit val system = context.system
+    import system.dispatcher
+    implicit val timeout = Timeout(1000000)
+
+    val pipeline = (
+      sendReceive)
+
+    def receive = {
+      //(userId: String, firstName: String, lastName: String, age: Int, gender: String)
+      case u: User =>
+        {
+
+          var userId = u.userId
+          var firstName = u.firstName
+          var lastName = u.lastName
+          var age = u.age
+          var gender = u.gender
+          log.debug("Creating user with id " + userId)
+          val result: Future[HttpResponse] = pipeline(Post(Constants.serverURL + "/createuser", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId", "firstName" : "$firstName" , "lastName" : "$lastName", "age" : $age , "gender" :  "$gender"}""")))
+          Await.result(result, timeout.duration)
+          result.onComplete {
+            x =>
+              {
+                createdUsers.incrementAndGet()
+                x.foreach { res => log.debug(res.entity.asString) }
+              }
+          }
+        }
+
+      case rf: FriendRequest => {
+        var userId = rf.userId
+        var frndIds = rf.frndId
+        log.debug("Requesting user,frnd : " + userId + " , " + frndIds)
+        val result: Future[HttpResponse] = pipeline(Post(Constants.serverURL + "/user/" + userId + "/addfriend", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId" , "frndId" : "$frndIds" }""")))
+        Await.result(result, timeout.duration)
+        result.onComplete {
+          x =>
+            {
+              frndsAdded.incrementAndGet()
+              x.foreach { res => log.debug(res.entity.asString) }
+            }
         }
       }
 
-      case abu: addBulkUser => {
-        var p = abu.userName
-        var count = 1
-        var prefix = "hat"
-        var suffixLength = 1
-        val result: Future[HttpResponse] =  pipeline(Post("http://localhost:8080/createusers",HttpEntity(MediaTypes.`application/json`,s"""{"count": $count, "prefix": "$prefix", "suffixLength": $suffixLength}""")))
-          result.foreach {
-        response =>
-          println(s"Created User:\n${response.entity.asString}")
+      case ap: UserPost => {
+        val result: Future[HttpResponse] = pipeline(Post(Constants.serverURL + "/user/" + userId + "/feed", HttpEntity(MediaTypes.`application/json`, s"""{"message": "$ap.message", "link": "$ap.link", "place": "$ap.place", "privacy": "$ap.privacy", "object_attachment": "$ap.object_attachment"}""")))
+        Await.result(result, timeout.duration)
+        result.onComplete {
+          x =>
+            {
+              frndsAdded.incrementAndGet()
+              x.foreach { res => log.debug(res.entity.asString) }
+            }
         }
       }
-      case au: addUser => {
-        val result: Future[HttpResponse] =  pipeline(Post("http://localhost:8080/createuser",HttpEntity(MediaTypes.`application/json`,s"""{"username": "$user"}""")))
-          result.foreach {
-        response =>
-          println(s"Created User:\n${response.entity.asString}")
+
+      case gp: getProfile => {
+        val result: Future[HttpResponse] = pipeline(Get(Constants.serverURL + "/profile/" + gp.userId))
+        Await.result(result, timeout.duration)
+        result.onComplete {
+          x =>
+            {
+              frndsAdded.incrementAndGet()
+              x.foreach { res => log.debug(res.entity.asString) }
+            }
         }
       }
-      case gp : getProfile => {
-        val result: Future[HttpResponse] =  pipeline(Get("http://localhost:8080/profile/"+gp.userName))
-          result.foreach {
-        response =>
-          println(s"Profile Page of user:\n${response.entity.asString}")
-        }
-      }
-      case ap: addPost => {
-        var privacy = ap.privacy
-        var attachment = ap.objtoattach
-        var place = ap.place
-        var message = ap.message
-        var link = ap.link
-        val result: Future[HttpResponse] =  pipeline(Post("http://localhost:8080/user/"+user+"/feed",HttpEntity(MediaTypes.`application/json`,s"""{"message": "$message", "link": "$link", "place": "$place", "privacy": "$privacy", "object_attachment": "$attachment"}""")))
-        result.foreach {
-        response =>
-          println(s"Post added:\n${response.entity.asString}")
-        }
-      }
+
       case gup: getPage => {
-        val result: Future[HttpResponse] =  pipeline(Get("http://localhost:8080/user/"+user+"/home"))
-        result.foreach {
-        response =>
-          println(s"Page :\n${response.entity.asString}")
+        val result: Future[HttpResponse] = pipeline(Get(Constants.serverURL + "/user/" + userId + "/home"))
+        Await.result(result, timeout.duration)
+        result.onComplete {
+          x =>
+            {
+              frndsAdded.incrementAndGet()
+              x.foreach { res => log.debug(res.entity.asString) }
+            }
         }
       }
-      case af: addFriend => {
-        var frndID = af.userName
-        val result: Future[HttpResponse] =  pipeline(Post("http://localhost:8080/user/"+user+"/addfriend",HttpEntity(MediaTypes.`application/json`,s"""{"username": "$frndID"}""")))
-        result.foreach {
-        response =>
-          println(s"Added friend:\n${response.entity.asString}")
-        }
-      }
+
       case gfl: getFriendList => {
-        var userID = gfl.userName
-        var frndId = gfl.frndName
-        val result: Future[HttpResponse] =  pipeline(Get("http://localhost:8080/user/"+userID+"/friendslist/"+frndId))
+        var userID = gfl.userId
+        var frndId = gfl.frndId
+        val result: Future[HttpResponse] = pipeline(Get(Constants.serverURL + "/user/" + userID + "/friendslist/" + frndId))
+        Await.result(result, timeout.duration)
+        result.onComplete {
+          x =>
+            {
+              frndsAdded.incrementAndGet()
+              x.foreach { res => log.debug(res.entity.asString) }
+            }
+        }
+      }
+
+      case a: Album => {
+        var userId = a.userId
+        var albumId = a.albumId
+        var coverPhoto = a.coverPhoto
+        var createdTime = a.createdTime
+        var description = a.description
+        var place = a.place
+        var updateTime = a.updateTime
+        var photos = a.photos
+        log.info(photos.mkString(","))
+        var photostring = a.photos.mkString(",")
+        val result: Future[HttpResponse] = pipeline(Post(Constants.serverURL + "/user/" + userId + "/albums/create", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId", "albumId" :"$albumId", "coverPhoto" : "$coverPhoto", "createdTime" : "$createdTime", "description" : "$description", "place":"$place", "updateTime" :"$updateTime", "photos" : [""]}""")))
         result.foreach {
-        response =>
-          println(s"Friends List:\n${response.entity.asString}")
+          response =>
+            log.info(s"added album:\n${response.entity.asString}")
         }
       }
-      case aa: addAlbum => {
-        var userId = aa.a.userId
-        var albumId = aa.a.albumId
-        var coverPhoto = aa.a.coverPhoto
-        var createdTime = aa.a.createdTime
-        var description = aa.a.description
-        var place = aa.a.place
-        var updateTime = aa.a.updateTime
-        var photos = aa.a.photos
-        val result: Future[HttpResponse] =  pipeline(Post("http://localhost:8080/user/"+user+"/albums/create",HttpEntity(MediaTypes.`application/json`,s"""{"userId": "$userId", "albumId" :"$albumId", "coverPhoto" : "$coverPhoto", "createdTime" : "$createdTime", "description" : "$description", "place":"$place", "updateTime" :"$updateTime", "photos" : [$photos]}""")))
-          result.foreach {
-        response =>
-          println(s"added album:\n${response.entity.asString}")
+
+      case p: Photo => {
+        var userId = p.userId
+        var albumId = p.albumId
+        var message = p.message
+        var noStory = p.noStory
+        var photoId = p.photoId
+        var place = p.place
+        var src = p.src
+        val result: Future[HttpResponse] = pipeline(Post(Constants.serverURL + "/user/" + userId + "/albums/photo", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId", "albumId" : "$albumId", "place": "$place","photoId": "$photoId", "src": "$src", "message": "$message", "noStory": $noStory}""")))
+        result.foreach {
+          response =>
+            log.info(s"Photo added:\n${response.entity.asString}")
         }
       }
-      case aa: addPhoto => {
-        var userId = aa.p.userId
-        var albumId = aa.p.albumId
-        var message = aa.p.message
-        var noStory = aa.p.noStory
-        var photoId = aa.p.photoId
-        var place = aa.p.place
-        var src = aa.p.src
-        val result: Future[HttpResponse] =  pipeline(Post("http://localhost:8080/user/"+user+"/albums/photo",HttpEntity(MediaTypes.`application/json`,s"""{"userId": "$userId", "albumId" : "$albumId", "place": "$place","photoId": "$photoId", "src": "$src", "message": "$message", "noStory": $noStory}""")))
-          result.foreach {
-        response =>
-          println(s"Photo added:\n${response.entity.asString}")
-        }
-      }
+
       case aa: getAlbumsInfo => {
-        val result: Future[HttpResponse] =  pipeline(Get("http://localhost:8080/albums/"+user))
-          result.foreach {
-        response =>
-          println(s"Albums:\n${response.entity.asString}")
+        val result: Future[HttpResponse] = pipeline(Get(Constants.serverURL + "/albums/" + userId))
+        result.foreach {
+          response =>
+            log.info(s"Albums:\n${response.entity.asString}")
         }
       }
-  }
+
+    }
+
+    //Image content will be encrypted and server does not know how to decrypt  
+    def readImage(name: String): String = {
+      var byteArray = Files.readAllBytes(Paths.get(name))
+      if (byteArray.length > 0) {
+        Base64.encodeBase64String(byteArray)
+      } else {
+        log.error("No image found at : " + name)
+        null
+      }
+    }
   }
 }

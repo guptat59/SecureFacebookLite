@@ -1,32 +1,44 @@
-import spray.http.DateTime
 import spray.httpx.SprayJsonSupport
-import spray.json._
-import java.util.UUID
+import spray.json.AdditionalFormats
+import spray.json.DefaultJsonProtocol
+import spray.json.JsValue
+import spray.json.JsonFormat
+import spray.json.NullOptions
+import spray.json.RootJsonFormat
+import spray.json.pimpAny
 import scala.collection.mutable.ListBuffer
-import java.util.ArrayList
 
 object Constants {
 
-  val totalUsers = 1000
-  val numOfFriends = 2 * (totalUsers / 100)
+  val serverPort = 9443
+  val serverHost = "localhost"
+  val serverURL = "http://" + serverHost + ":" + serverPort
+
+  val totalUsers = 10
+  val numOfFriends = (2 * (totalUsers / 100)).toInt + 5
   val initialAlbumsCount = 2
   val initialPostsCount = 3
 
-  object privacy {
-    val friends = "friends"
-    val personal = "personal"
+  object Privacy {
+    val Friends = "friends"
+    val Private = "personal"
   }
 
   object messages {
-    val success = "Successfully completed"
+    val success = "OK! Successfully completed"
+    val created = "OK! user created successfully "
+    val photoAdded = "OK! Successfully added the photo to user profile"
+    val albumCreated = "OK! Album successfully created."
+
     val noUser = "User does not exist!!"
     val noPermission = "You dont have permission to perform this operation"
     val userAlreadyPresent = "Username already exists"
-    val albumCreated = "Album successfully created."
     val albumCreationFailed = "Album creation failed"
-    val photoAdded = "Successfully added the photo to user profile"
     val photoAddFailed = "Photo addition to user album failed"
   }
+
+  val prefix = "src\\main\\resources\\"
+  val images = Array[String](prefix + "Hello.jpg", prefix + "Secure.jpg", prefix + "World.jpg")
 }
 
 object Gender extends Enumeration {
@@ -44,24 +56,21 @@ object UserLoginJsonSupport extends DefaultJsonProtocol with SprayJsonSupport {
 //JSON Types
 //found : Any required: spray.httpx.marshalling.ToResponseMarshallable
 
-trait anyjson
 case class User(userId: String, firstName: String, lastName: String, age: Int, gender: String)
-case class NewUsersReq(count: Int, prefix: String, suffixLength: Option[Int] = None)
-case class NewUserReq(username: String)
-case class FriendReq(username: String)
+case class FriendRequest(userId: String, frndId: String)
 case class UsersList(userIds: Array[String])
 case class UserPost(message: String, link: Option[String] = None, place: Option[String] = None, privacy: String, object_attachment: Option[String] = None)
 case class PostAdded(uuid: String, message: String)
 case class UserPage(posts: Array[UserPost])
-case class Album(userId: String, albumId: String, coverPhoto: Option[String] = None, createdTime: Option[String] = None, description: Option[String] = None, place: Option[String] = None, updateTime: Option[String] = None, var photos: Array[String])
+case class Album(userId: String, albumId: String, coverPhoto: Option[String] = None, createdTime: Option[String] = None, description: Option[String] = None, place: Option[String] = None, updateTime: Option[String] = None, var photos: Option[Array[String]] = None)
 case class Photo(userId: String, albumId: String, photoId: String, src: String, message: Option[String] = None, place: Option[String] = None, noStory: Boolean = false)
 case class Success(reason: String)
 case class Error(reason: String)
+case class UserProfile(u : User, a: Array[Album])
 
-object jsonProtocol extends DefaultJsonProtocol with SprayJsonSupport with NullOptions {
-  implicit val NewUsersReqFormat = jsonFormat3(NewUsersReq)
-  implicit val NewUserReqFormat = jsonFormat1(NewUserReq)
-  implicit val FriendReqFormat = jsonFormat1(FriendReq)
+object jsonProtocol extends DefaultJsonProtocol with SprayJsonSupport with NullOptions with AdditionalFormats {
+  implicit val FriendReqFormat = jsonFormat2(FriendRequest)
+
   implicit object NewUsersResFormat extends RootJsonFormat[UsersList] {
     def read(value: JsValue) = UsersList(value.convertTo[Array[String]])
     def write(f: UsersList) = f.userIds.toJson
@@ -76,14 +85,14 @@ object jsonProtocol extends DefaultJsonProtocol with SprayJsonSupport with NullO
   implicit def userPageFormat[Post: JsonFormat] = jsonFormat1(UserPage.apply)
   implicit val albumFormat = jsonFormat8(Album)
   implicit val photoFormat = jsonFormat7(Photo)
+  implicit val userProfileFormat = jsonFormat2(UserProfile)
   implicit val errorFormat = jsonFormat1(Error)
   implicit val successFormat = jsonFormat1(Success)
 }
 
-case class findProfile(userId: String)
+case class findProfile(userId: String)//, reqUserId : String)
 case class addPost(postId: String, userId: String, post: UserPost) //extends Seal
 case class addFriend(userId: String)
-case class requestFriend(userId: String, req: FriendReq)
 case class getUserPage(userId: String)
 case class getFriendsList(userId: String, frndId: String)
 case class getPhotos(userId: String)
@@ -129,3 +138,4 @@ class Picture(val albumId: String, val photoId: String, val src: String) {
     place = pplace
   }
 }
+
