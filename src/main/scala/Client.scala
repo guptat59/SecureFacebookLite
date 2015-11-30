@@ -56,18 +56,20 @@ object FacebookSimulator {
   implicit val timeout = Timeout(1)
 
   val userPrefix = "user"
+  val totalUsers = Constants.totalUsers
+  val activeUsers = (2 / 3) * totalUsers
+  val posts = (3 / 5) * activeUsers
+  val newuser = if (totalUsers * 0.000005 < 1) 1 else totalUsers * 0.000005
+  val scPostTime = (60 * 60) / posts
+  val scPhotoTime = 2 * scPostTime
+  val scNewUser = 60 / newuser
+  val scFrndReq = 60
+  val scView = 0.01
+  val postUserPer = 25 / 100 * (activeUsers)
+  val postPhotoPer = 40 / 100 * (activeUsers)
+  val viewPer = totalUsers
 
   def main(args: Array[String]) {
-    //create 100 users
-    //add 10 friends to each user
-    //20-30% users post/add photo/album
-    //70% gets friendslist/page of friends/profile of friends/photos/albums
-    //user should request for 
-    //FBServer.
-    //1.5billion users
-    //1 billion active users
-    //600 million posts
-    //300 million photos
 
     createUsers()
 
@@ -208,32 +210,22 @@ object FacebookSimulator {
 
   def startSchedulers(): Unit = {
     import system.dispatcher
-
-    var postGenerator: Cancellable = system.scheduler.schedule(FiniteDuration.apply(1.toLong, "seconds"), FiniteDuration.apply(.1.toLong, "seconds"), (new Runnable {
+    var scpost: Cancellable = system.scheduler.schedule(FiniteDuration.apply(1, "seconds"), FiniteDuration.apply(scPostTime.toLong, "seconds"), (new Runnable {
       def run {
-        var userName = userPrefix + (Random.nextInt((Constants.totalUsers * 10) / 100) + 1)
-        println(userName + " scheduler1")
-        var user = system.actorSelection(namingPrefix + userName)
-        user ! UserPost("post", None, None, Privacy.Friends, None)
-      }
-    }))
-
-    var albumGenerator: Cancellable = system.scheduler.schedule(FiniteDuration.apply(1.toLong, "seconds"), FiniteDuration.apply(.1.toLong, "seconds"), (new Runnable {
-      def run {
-        var userName = userPrefix + (Random.nextInt((Constants.totalUsers * 10) / 100) + 1)
-        println(userName + " scheduler1")
+        var userName = "user" + (Random.nextInt(postUserPer) + 1)
+        println(userName + " scpost")
         var user = system.actorSelection(namingPrefix + userName)
         user ! UserPost("post", None, None, Privacy.Friends, None)
       }
     }))
 
     var sccount = 1
-    var imageNAlbumGenerator: Cancellable = system.scheduler.schedule(FiniteDuration.apply(1, "seconds"), FiniteDuration.apply(.2.toLong, "seconds"), (new Runnable {
+    var scphoto: Cancellable = system.scheduler.schedule(FiniteDuration.apply(1, "seconds"), FiniteDuration.apply(scPhotoTime.toLong, "seconds"), (new Runnable {
       def run {
         sccount = sccount + 1
-        var r = Random.nextInt((Constants.totalUsers * 20) / 100) + 1
-        var userName = userPrefix + r
-        println(userName + " scheduler2")
+        var r = Random.nextInt(postPhotoPer) + 1
+        var userName = "user" + r
+        println(userName + " scphoto")
         var user = system.actorSelection(namingPrefix + userName)
         if (r % 2 == 0)
           user ! new Album(userName, userName + "album" + sccount)
@@ -242,12 +234,12 @@ object FacebookSimulator {
       }
     }))
 
-    var pageNProfileFetcher: Cancellable = system.scheduler.schedule(FiniteDuration.apply(1, "seconds"), FiniteDuration.apply(.001.toLong, "seconds"), (new Runnable {
+    var scview: Cancellable = system.scheduler.schedule(FiniteDuration.apply(1, "seconds"), FiniteDuration.apply(scView.toLong, "seconds"), (new Runnable {
       def run {
         sccount = sccount + 1
-        var r = Random.nextInt((Constants.totalUsers * 80) / 100) + 1 + (Constants.totalUsers * 20) / 100
-        var userName = userPrefix + r
-        println(userName + " scheduler3")
+        var r = Random.nextInt(totalUsers) + 1
+        var userName = "user" + r
+        println(userName + " scview")
         var user = system.actorSelection(namingPrefix + userName)
         if (r % 2 == 0)
           user ! getProfile(userPrefix + Random.nextInt(Constants.totalUsers))
@@ -256,22 +248,34 @@ object FacebookSimulator {
       }
     }))
 
-    var friendRequester: Cancellable = system.scheduler.schedule(FiniteDuration.apply(1, "seconds"), FiniteDuration.apply(5.toLong, "seconds"), (new Runnable {
+    var scfrndreq: Cancellable = system.scheduler.schedule(FiniteDuration.apply(5, "seconds"), FiniteDuration.apply(scFrndReq.toLong, "seconds"), (new Runnable {
       def run {
         sccount = sccount + 1
         var r = Random.nextInt(Constants.totalUsers) + 1
-        var userName = userPrefix + r
-        println(userName + " scheduler4")
+        var userName = "user" + r
+        println(userName + " scfrndreq")
         var user = system.actorSelection(namingPrefix + userName)
         user ! addFriend(userPrefix + (Random.nextInt(Constants.totalUsers) + 1))
       }
     }))
 
-    postGenerator.cancel()
-    imageNAlbumGenerator.cancel()
-    pageNProfileFetcher.cancel()
-    friendRequester.cancel()
+     var scnewuser: Cancellable = system.scheduler.schedule(FiniteDuration.apply(5, "seconds"), FiniteDuration.apply(scNewUser.toLong, "seconds"), (new Runnable {
+      def run {
+        val usercount = sccount + totalUsers 
+        var userName = "user"+usercount
+        var user = system.actorOf(Props(new UserClient(userName)),userName)
+        println(userName + " scnewuser")
+        var u = new User(userName, "First-" + userName, "Last-" + userName, Random.nextInt(100) + 1, Gender.apply(Random.nextInt(Gender.maxId)).toString());
+        user ! u
+      }
+    }))
 
+    Thread.sleep(1000000)
+    scpost.cancel()
+    scphoto.cancel()
+    scview.cancel()
+    scnewuser.cancel()
+    scfrndreq.cancel()
   }
 
   sealed trait seal
