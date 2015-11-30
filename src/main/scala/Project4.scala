@@ -77,38 +77,44 @@ object FacebookServer extends App with SimpleRoutingApp {
     respondWithMediaType(MediaTypes.`application/json`) { detach() { route } }
   }
 
-  lazy val createProfile = {
-    jsonRes {
-      path("user") {
-        put {
-          entity(as[User]) { newUsr =>
-            complete {
-              // TODO
-              val f = Await.result(FBServers ? newUsr, timeout.duration);
-              if (f.isInstanceOf[Success])
-                f.asInstanceOf[Success]
-              else if (f.isInstanceOf[Error])
-                f.asInstanceOf[Error]
-              else
-                Error("Failed due to internal error2")
+  lazy val createProfile =
+    {
+      jsonRes {
+        path("user") {
+          put {
+            entity(as[User]) { newUsr =>
+              complete {
+                if (!userbase.contains(newUsr.userId)) {
+                  val f = Await.result(FBServers ? newUsr, timeout.duration);
+                  if (f.isInstanceOf[Success]) { f.asInstanceOf[Success] }
+                  else if (f.isInstanceOf[Error]) { f.asInstanceOf[Error] }
+                  else
+                    Error("Failed due to internal error2")
+                } else {
+                  Error("User already exists!")
+                }
+              }
+
             }
-          }
-        } ~ post {
-          entity(as[User]) { newUsr =>
-            complete {
-              val f = Await.result(FBServers ? newUsr, timeout.duration);
-              if (f.isInstanceOf[Success])
-                f.asInstanceOf[Success]
-              else if (f.isInstanceOf[Error])
-                f.asInstanceOf[Error]
-              else
-                Error("Failed due to internal error2")
+          } ~
+            post {
+              entity(as[User]) { newUsr =>
+                complete {
+                  if (userbase.contains(newUsr.userId)) {
+                    val f = Await.result(FBServers ? newUsr, timeout.duration);
+                    if (f.isInstanceOf[Success]) { f.asInstanceOf[Success] }
+                    else if (f.isInstanceOf[Error]) { f.asInstanceOf[Error] }
+                    else
+                      Error("Failed due to internal error2")
+                  } else {
+                    Error("User doesnt exist!")
+                  }
+                }
+              }
             }
-          }
         }
       }
     }
-  }
 
   lazy val getProfiles = {
     get_JsonRes {
@@ -147,7 +153,6 @@ object FacebookServer extends App with SimpleRoutingApp {
     }
   }
 
-  
   lazy val getPage = {
     get_JsonRes {
       path("user" / "[a-zA-Z0-9]*".r / "home") { userId =>
@@ -185,18 +190,15 @@ object FacebookServer extends App with SimpleRoutingApp {
 
   lazy val getFrndList = {
     get_JsonRes {
-
-      get {
-        path("user" / "[a-zA-Z0-9]*".r / "friendslist" / "[a-zA-Z0-9]*".r) { (userId, frndId) =>
-          complete {
-            var f = Await.result(FBServers ? getFriendsList(userId, frndId), timeout.duration)
-            if (f.isInstanceOf[UsersList]) {
-              f.asInstanceOf[UsersList]
-            } else if (f.isInstanceOf[Error]) {
-              f.asInstanceOf[Error]
-            } else {
-              Error("Failed due to internal error")
-            }
+      path("user" / "[a-zA-Z0-9]*".r / "friendslist" / "[a-zA-Z0-9]*".r) { (userId, frndId) =>
+        complete {
+          var f = Await.result(FBServers ? getFriendsList(userId, frndId), timeout.duration)
+          if (f.isInstanceOf[UsersList]) {
+            f.asInstanceOf[UsersList]
+          } else if (f.isInstanceOf[Error]) {
+            f.asInstanceOf[Error]
+          } else {
+            Error("Failed due to internal error")
           }
         }
       }
@@ -227,13 +229,38 @@ object FacebookServer extends App with SimpleRoutingApp {
         }
       } ~
         delete {
-          complete {
-            Error("TODO")
+          path("user" / "[a-zA-Z0-9]*".r / "albums" / "delete" / "[a-zA-Z0-9]*".r) { (userId, albumId) =>
+            complete {
+              //no check for userid 
+              var f = Await.result(FBServers ? deleteAlbum(userId, albumId), timeout.duration)
+              if (f.isInstanceOf[Success]) {
+                f.asInstanceOf[Success]
+              } else if (f.isInstanceOf[Error]) {
+                f.asInstanceOf[Error]
+              } else {
+                Error("Failed due to internal error")
+              }
+            }
           }
         } ~
         post {
-          complete {
-            Error("TODO")
+          path("user" / "[a-zA-Z0-9]*".r / "albums" / "update") { (userId) =>
+            entity(as[Album]) { album =>
+              complete {
+                if (userId.equals(album.userId)) {
+                  var f = Await.result(FBServers ? album, timeout.duration)
+                  if (f.isInstanceOf[Success]) {
+                    f.asInstanceOf[Success]
+                  } else if (f.isInstanceOf[Error]) {
+                    f.asInstanceOf[Error]
+                  } else {
+                    Error("Failed due to internal error")
+                  }
+                } else {
+                  Error(Constants.messages.noPermission)
+                }
+              }
+            }
           }
         }
     }
@@ -279,6 +306,7 @@ object FacebookServer extends App with SimpleRoutingApp {
             }
           }
         }
+
       } ~
         post {
           complete {
@@ -290,6 +318,7 @@ object FacebookServer extends App with SimpleRoutingApp {
             Error("TODO")
           }
         }
+
     }
   }
 
@@ -322,8 +351,9 @@ object FacebookServer extends App with SimpleRoutingApp {
           log.debug("created user : " + userId)
           sender ! Success(Constants.messages.created + userId)
         } else {
-          log.error("Duplicate user id generated : " + userId)
-          sender ! Error(Constants.messages.userAlreadyPresent + userId)
+          var user = userbase.get(userId)
+          user.get.insertData(u.age, u.firstName, u.lastName, u.gender)
+          sender ! Success(userId + Constants.messages.updated)
         }
       }
 
@@ -419,6 +449,8 @@ object FacebookServer extends App with SimpleRoutingApp {
         var user = userbase.get(aa.userId)
         if (user.isEmpty) {
           sender ! Error(Constants.messages.noUser)
+        } else if (user.get.getUserAlbumsIds(aa.userId).contains(aa.albumId)) {
+          sender
         } else {
           var isSuccess = user.get.addAlbumToUser(aa.userId, aa);
           if (isSuccess) {
@@ -427,6 +459,15 @@ object FacebookServer extends App with SimpleRoutingApp {
           } else {
             sender ! Error(Constants.messages.albumCreationFailed)
           }
+        }
+      }
+
+      case da: deleteAlbum => {
+        var user = userbase.get(da.userId)
+        if (user.isEmpty) {
+          sender ! Error(Constants.messages.noUser)
+        } else {
+          sender ! user.get.deleteAlbumToUser(da.userId, da.albumId)
         }
       }
 
@@ -465,6 +506,7 @@ object FacebookServer extends App with SimpleRoutingApp {
       user.insertData(u.age, u.firstName, u.lastName, u.gender)
       user
     }
+
   }
 
   class UserInfo(val userid: String, var age: Int = -1, var firstName: String = "", var lastName: String = "", var gender: String = "NA") {
@@ -517,10 +559,8 @@ object FacebookServer extends App with SimpleRoutingApp {
     }
 
     def addAlbumToUser(userId: String, album: Album): Boolean = {
-
       //Add this album to user album store.
       if (userAlbums.contains(album.albumId)) {
-        // Album already exists for this user. Should not happen. Higher level check
         log.error("Album already added!!")
         false
       } else {
@@ -528,6 +568,29 @@ object FacebookServer extends App with SimpleRoutingApp {
         var picAlbum = new PictureAlbum(userId, album.albumId)
         albumStore.put(album.albumId, picAlbum)
         true
+      }
+    }
+
+    def updateAlbumToUser(userId: String, album: Album): Boolean = {
+      if (userAlbums.contains(album.albumId)) {
+        var picAlbum = albumStore.get(album.albumId)
+        picAlbum.update(album.coverPhoto, album.description, album.place)
+        true
+      } else {
+        log.error("Album doesnot exist!!")
+        false
+      }
+    }
+
+    def deleteAlbumToUser(userId: String, albumId: String): Boolean = {
+      if (userAlbums.contains(albumId)) {
+        userAlbums -= albumId
+        albumStore.remove(albumId)
+        //have to remove from photostore
+        true
+      } else {
+        log.error("Album doesnot exist!!")
+        false
       }
     }
 

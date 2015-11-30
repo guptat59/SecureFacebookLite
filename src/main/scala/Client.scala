@@ -62,7 +62,8 @@ object FacebookSimulator {
   val posts = (3 / 5) * activeUsers
   val newuser = if (totalUsers * 0.000005 < 1) 1 else totalUsers * 0.000005
   val scPostTime = (60 * 60) / posts
-  val scPhotoTime = 2 * scPostTime
+  val scAlbumTime = 10 * scPostTime
+  val scPhotoTime = 5 * scPostTime
   val scNewUser = 60 / newuser
   val scFrndReq = 60
   val scView = 0.01
@@ -313,14 +314,13 @@ object FacebookSimulator {
       //(userId: String, firstName: String, lastName: String, age: Int, gender: String)
       case u: User =>
         {
-
           var userId = u.userId
           var firstName = u.firstName
           var lastName = u.lastName
           var age = u.age
           var gender = u.gender
           log.debug("Creating user with id " + userId)
-          val result: Future[HttpResponse] = pipeline(Post(Constants.serverURL + "/createuser", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId", "firstName" : "$firstName" , "lastName" : "$lastName", "age" : $age , "gender" :  "$gender"}""")))
+          val result: Future[HttpResponse] = pipeline(Put(Constants.serverURL + "/createuser", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId", "firstName" : "$firstName" , "lastName" : "$lastName", "age" : $age , "gender" :  "$gender"}""")))
           Await.result(result, timeout.duration)
           result.onComplete {
             x =>
@@ -335,7 +335,7 @@ object FacebookSimulator {
         var userId = rf.userId
         var frndIds = rf.frndId
         log.debug("Requesting user,frnd : " + userId + " , " + frndIds)
-        val result: Future[HttpResponse] = pipeline(Post(Constants.serverURL + "/user/" + userId + "/addfriend", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId" , "frndId" : "$frndIds" }""")))
+        val result: Future[HttpResponse] = pipeline(Put(Constants.serverURL + "/user/" + userId + "/addfriend", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId" , "frndId" : "$frndIds" }""")))
         Await.result(result, timeout.duration)
         result.onComplete {
           x =>
@@ -347,7 +347,7 @@ object FacebookSimulator {
       }
 
       case ap: UserPost => {
-        val result: Future[HttpResponse] = pipeline(Post(Constants.serverURL + "/user/" + userId + "/feed", HttpEntity(MediaTypes.`application/json`, s"""{"message": "$ap.message", "link": "$ap.link", "place": "$ap.place", "privacy": "$ap.privacy", "object_attachment": "$ap.object_attachment"}""")))
+        val result: Future[HttpResponse] = pipeline(Put(Constants.serverURL + "/user/" + userId + "/feed", HttpEntity(MediaTypes.`application/json`, s"""{"message": "$ap.message", "link": "$ap.link", "place": "$ap.place", "privacy": "$ap.privacy", "object_attachment": "$ap.object_attachment"}""")))
         Await.result(result, timeout.duration)
         result.onComplete {
           x =>
@@ -400,6 +400,14 @@ object FacebookSimulator {
               albumsAdded.incrementAndGet()
               x.foreach { res => log.debug(res.entity.asString) }
             }
+        }
+      }
+
+      case a: Album => {
+        var result = addAlbum(a)
+        result.foreach {
+          response =>
+            log.info(s"added album:\n${response.entity.asString}")
         }
       }
 

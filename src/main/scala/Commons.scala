@@ -29,7 +29,8 @@ object Constants {
     val created = "OK! user created successfully "
     val photoAdded = "OK! Successfully added the photo to user profile"
     val albumCreated = "OK! Album successfully created."
-
+    val updated = "details successfully updated"
+    
     val noUser = "User does not exist!!"
     val noPermission = "You dont have permission to perform this operation"
     val userAlreadyPresent = "Username already exists"
@@ -95,6 +96,7 @@ case class addPost(postId: String, userId: String, post: UserPost) //extends Sea
 case class addFriend(userId: String)
 case class getUserPage(userId: String)
 case class getFriendsList(userId: String, frndId: String)
+case class deleteAlbum(userId: String, albumId: String)
 case class getPhotos(userId: String)
 case class getUserAlbums(userId: String, frndId: Option[String])
 case class systemSetup()
@@ -115,6 +117,13 @@ class PictureAlbum(val ownerId: String, val albumId: String) {
     createdTime = System.currentTimeMillis().toString()
     updateTime = System.currentTimeMillis().toString()
     photos = new ListBuffer[String]
+  }
+  
+  def update(pcoverPhoto: Option[String] = None, pdescription: Option[String] = None, pplace: Option[String] = None) {
+    coverPhoto = pcoverPhoto
+    description = pdescription
+    place = pplace
+    updateTime = System.currentTimeMillis().toString()
   }
 
   def addPicture(pic: Picture) {
