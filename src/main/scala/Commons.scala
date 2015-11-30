@@ -68,7 +68,6 @@ case class Album(userId: String, albumId: String, coverPhoto: Option[String] = N
 case class Photo(userId: String, albumId: String, photoId: String, src: String, message: Option[String] = None, place: Option[String] = None, noStory: Boolean = false)
 case class Success(reason: String)
 case class Error(reason: String)
-case class UserAlbums(a: Array[Album])
 
 object jsonProtocol extends DefaultJsonProtocol with SprayJsonSupport with NullOptions with AdditionalFormats {
   implicit val FriendReqFormat = jsonFormat2(FriendRequest)
@@ -87,7 +86,6 @@ object jsonProtocol extends DefaultJsonProtocol with SprayJsonSupport with NullO
   implicit def userPageFormat[Post: JsonFormat] = jsonFormat1(UserPage.apply)
   implicit val albumFormat = jsonFormat8(Album)
   implicit val photoFormat = jsonFormat7(Photo)
-  implicit val userProfileFormat = jsonFormat1(UserAlbums)
   implicit val errorFormat = jsonFormat1(Error)
   implicit val successFormat = jsonFormat1(Success)
 }

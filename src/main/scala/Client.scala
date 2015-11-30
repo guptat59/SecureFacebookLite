@@ -41,6 +41,7 @@ import HttpMethods._
 import HttpHeaders._
 import ContentTypes._
 import scala.concurrent.Await
+import java.util.UUID
 
 object FacebookSimulator {
 
@@ -96,7 +97,7 @@ object FacebookSimulator {
     }
 
     createPhotos()
-    
+
     while (photosAdded.get() < Constants.totalUsers) {
       Thread.sleep(1000)
       println("Waiting till all the users have at least one album!! : " + albumsAdded.get())
@@ -212,7 +213,7 @@ object FacebookSimulator {
     import system.dispatcher
     var scpost: Cancellable = system.scheduler.schedule(FiniteDuration.apply(1, "seconds"), FiniteDuration.apply(scPostTime.toLong, "seconds"), (new Runnable {
       def run {
-        var userName = "user" + (Random.nextInt(postUserPer) + 1)
+        var userName = userPrefix + (Random.nextInt(postUserPer) + 1)
         println(userName + " scpost")
         var user = system.actorSelection(namingPrefix + userName)
         user ! UserPost("post", None, None, Privacy.Friends, None)
@@ -220,17 +221,26 @@ object FacebookSimulator {
     }))
 
     var sccount = 1
+
+    var scalbum: Cancellable = system.scheduler.schedule(FiniteDuration.apply(1, "seconds"), FiniteDuration.apply(scPhotoTime.toLong, "seconds"), (new Runnable {
+      def run {
+        sccount = sccount + 1
+        var r = Random.nextInt(postPhotoPer) + 1
+        var userName = userPrefix + r
+        println(userName + " scalbum")
+        var user = system.actorSelection(namingPrefix + userName)
+        user ! addDynamicAlbumAndPhoto()
+      }
+    }))
+
     var scphoto: Cancellable = system.scheduler.schedule(FiniteDuration.apply(1, "seconds"), FiniteDuration.apply(scPhotoTime.toLong, "seconds"), (new Runnable {
       def run {
         sccount = sccount + 1
         var r = Random.nextInt(postPhotoPer) + 1
-        var userName = "user" + r
+        var userName = userPrefix + r
         println(userName + " scphoto")
         var user = system.actorSelection(namingPrefix + userName)
-        if (r % 2 == 0)
-          user ! new Album(userName, userName + "album" + sccount)
-        else
-          user ! new Photo(userName, userName + "album1", "uphoto" + sccount, "fb", None, None, true)
+        user ! addPhotoToExistingAlbum()
       }
     }))
 
@@ -238,7 +248,7 @@ object FacebookSimulator {
       def run {
         sccount = sccount + 1
         var r = Random.nextInt(totalUsers) + 1
-        var userName = "user" + r
+        var userName = userPrefix + r
         println(userName + " scview")
         var user = system.actorSelection(namingPrefix + userName)
         if (r % 2 == 0)
@@ -252,18 +262,18 @@ object FacebookSimulator {
       def run {
         sccount = sccount + 1
         var r = Random.nextInt(Constants.totalUsers) + 1
-        var userName = "user" + r
+        var userName = userPrefix + r
         println(userName + " scfrndreq")
         var user = system.actorSelection(namingPrefix + userName)
         user ! addFriend(userPrefix + (Random.nextInt(Constants.totalUsers) + 1))
       }
     }))
 
-     var scnewuser: Cancellable = system.scheduler.schedule(FiniteDuration.apply(5, "seconds"), FiniteDuration.apply(scNewUser.toLong, "seconds"), (new Runnable {
+    var scnewuser: Cancellable = system.scheduler.schedule(FiniteDuration.apply(5, "seconds"), FiniteDuration.apply(scNewUser.toLong, "seconds"), (new Runnable {
       def run {
-        val usercount = sccount + totalUsers 
-        var userName = "user"+usercount
-        var user = system.actorOf(Props(new UserClient(userName)),userName)
+        val usercount = sccount + totalUsers
+        var userName = userPrefix + usercount
+        var user = system.actorOf(Props(new UserClient(userName)), userName)
         println(userName + " scnewuser")
         var u = new User(userName, "First-" + userName, "Last-" + userName, Random.nextInt(100) + 1, Gender.apply(Random.nextInt(Gender.maxId)).toString());
         user ! u
@@ -272,6 +282,7 @@ object FacebookSimulator {
 
     Thread.sleep(1000000)
     scpost.cancel()
+    scalbum.cancel()
     scphoto.cancel()
     scview.cancel()
     scnewuser.cancel()
@@ -284,7 +295,9 @@ object FacebookSimulator {
   case class getProfile(userId: String)
   case class getFriendList(userId: String, frndId: String)
   case class addDefaultAlbum()
+  case class addDynamicAlbumAndPhoto()
   case class addDefaultImages()
+  case class addPhotoToExistingAlbum()
   case class addImage()
   case class addAlbum()
 
@@ -390,18 +403,27 @@ object FacebookSimulator {
         }
       }
 
-      case a: Album => {
-        var result = addAlbum(a)
+      case a: addDynamicAlbumAndPhoto => {
+        var albumId = userId + UUID.randomUUID()
+        var result = addAlbum(Album(userId, albumId, Some(userId + "-defaultphoto"), Some(System.currentTimeMillis().toString()), Option("dynamic album " + albumId), Option(Constants.places(Random.nextInt(Constants.places.length))), Some(System.currentTimeMillis().toString()), None))
+        Await.result(result, timeout.duration)
         result.onComplete {
           x =>
             {
               x.foreach { res => log.debug(res.entity.asString) }
+              var photoId = userId + UUID.randomUUID()
+              var p = Photo(userId, albumId, photoId, readImage(), Some("Dynamic image" + photoId), Option(Constants.places(Random.nextInt(Constants.places.length))), false)
+              var r = addImage(p)
+              Await.result(r, timeout.duration)
+              r.onComplete { y =>
+                y.foreach { z => log.debug(z.entity.asString) }
+              }
             }
         }
       }
 
       case a: addDefaultImages => {
-        var src = readImage(Constants.images(Random.nextInt(Constants.images.length)))
+        var src = readImage()
         //userId: String, albumId: String, photoId: String, src: String, message: Option[String] = None, place: Option[String] = None, noStory: Boolean = false)
         var p = Photo(userId, userId + "-defaultalbum", userId + "-defaultphoto", src, Some("Default first image"), Option(Constants.places(Random.nextInt(Constants.places.length))), false)
         var result = addImage(p)
@@ -414,26 +436,42 @@ object FacebookSimulator {
         }
       }
 
+      case p: addPhotoToExistingAlbum => {
+
+        var albums = getUserAlbums()
+        var photoId = userId + UUID.randomUUID();
+        var p = Photo(userId, albums(Random.nextInt(albums.length)).albumId, photoId, readImage(), Some("Dynamic image to existing album " + photoId), Option(Constants.places(Random.nextInt(Constants.places.length))), false)
+        var result = addImage(p)
+        Await.result(result, timeout.duration)
+        result.onComplete { x =>
+          x.foreach {
+            response =>
+              log.debug(s"Photo added :\n${response.entity.asString}")
+          }
+        }
+      }
+
       case p: Photo => {
         var result = addImage(p)
         result.foreach {
           response =>
-            log.info(s"Photo added:\n${response.entity.asString}")
+            log.debug(s"Photo added:\n${response.entity.asString}")
         }
       }
 
-      case aa: getUserAlbums => {
-        val result: Future[HttpResponse] = pipeline(Get(Constants.serverURL + "/albums/" + userId))
-        Await.result(result, timeout.duration)
-        result.onComplete {
-          x =>
-            {
-              frndsAdded.incrementAndGet()
-              x.foreach { res => log.debug(res.entity.asString) }
-              sender ! x.asInstanceOf[UserAlbums]
-            }
-        }
+    }
+
+    def getUserAlbums(): Array[Album] = {
+      val result: Future[HttpResponse] = pipeline(Get(Constants.serverURL + "/albums/" + userId))
+      Await.result(result, timeout.duration)
+      result.onComplete {
+        x =>
+          {
+            x.foreach { res => log.debug(res.entity.asString) }
+            x.asInstanceOf[Array[Album]]
+          }
       }
+      null
     }
 
     def addAlbum(a: Album): Future[HttpResponse] = {
@@ -462,7 +500,8 @@ object FacebookSimulator {
     }
 
     //Image content will be encrypted and server does not know how to decrypt  
-    def readImage(name: String): String = {
+    def readImage(): String = {
+      var name = Constants.images(Random.nextInt(Constants.images.length))
       var byteArray = Files.readAllBytes(Paths.get(name))
       if (byteArray.length > 0) {
         Base64.encodeBase64String(byteArray)
