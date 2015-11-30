@@ -109,7 +109,7 @@ case class addPost(postId: String, userId: String, post: UserPost) //extends Sea
 case class getUserPage(userId: String)
 case class getFriendsList(userId: String, frndId: String)
 case class deleteAlbum(userId: String, albumId: String)
-case class getPhotos(userId: String)
+case class getPhotos(photoId: String)
 case class getUserAlbums(userId: String, frndId: String)
 case class systemSetup()
 

@@ -58,18 +58,14 @@ object FacebookSimulator {
 
   val userPrefix = "user"
   val totalUsers = Constants.totalUsers
-  println("tu" + totalUsers)
   val activeUsers = ((2 * totalUsers) / 3)
-  println("au" + activeUsers)
   val posts = ((3 * activeUsers) / 5)
-  println("po" + posts)
   val newuser = if (totalUsers * 0.000005 < 1) 1 else totalUsers * 0.000005
-  println("nu" + newuser)
   val scPostTime = ((60 * 60) / posts) + 0.1
 
-  println("tu" + totalUsers)
   val scAlbumTime = 10 * scPostTime
   val scPhotoTime = 2 * scPostTime
+  val scUpdateTime = 5
 
   val scNewUser = 60 / newuser
   val scFrndReq = 60
@@ -110,7 +106,6 @@ object FacebookSimulator {
       Thread.sleep(1000)
       println("Waiting till all the users have at least one album!! : " + albumsAdded.get())
     }
-
     var firstTime = true;
 
     var userName = userPrefix + 4
@@ -134,6 +129,17 @@ object FacebookSimulator {
       user ? UserPost(userName, "post by " + userName, Option("google1"), Option("Paris"), Privacy.Friends, Some("uuid")); Thread.sleep(sleepdelay)
       frnd ? UserPost(frndName, "post by " + frndName, Option("google2"), Option("London"), Privacy.Friends, Some("uuid")); Thread.sleep(sleepdelay)
 
+      println("get profile >> ")
+
+      user ? getProfile(frndName); Thread.sleep(sleepdelay)
+      frnd ? getProfile(userName); Thread.sleep(sleepdelay)
+
+      println("update profile >>")
+      var u = new User(userName, "First-" + userName+"u", "Last-" + userName+"u", Random.nextInt(100) + 1, Gender.apply(Random.nextInt(Gender.maxId)).toString(), Relation.Single.toString());
+      user ? updateProfile(u); Thread.sleep(sleepdelay)
+      var f = new User(frndName, "First-" + frndName+"u", "Last-" + frndName+"u", Random.nextInt(100) + 1, Gender.apply(Random.nextInt(Gender.maxId)).toString(), Relation.Single.toString());
+      frnd ? updateProfile(f); Thread.sleep(sleepdelay)
+      
       println("get profile >> ")
 
       user ? getProfile(frndName); Thread.sleep(sleepdelay)
@@ -165,6 +171,19 @@ object FacebookSimulator {
 
       println("addPhotoToExistingAlbum>> ")
       user ? addPhotoToExistingAlbum()
+      
+      println("get frnd album info>> ")
+      
+      var a = new Album(userName, userName + "-defaultalbum", None, Some(System.currentTimeMillis().toString()), Option("initial album"), Option("Hyderabad"), Some(System.currentTimeMillis().toString()), None)
+      user ? updateAlbum(a); Thread.sleep(sleepdelay)
+      //frnd ? updateAlbum(a); Thread.sleep(sleepdelay)
+      
+      println("get frnd album info>> ")
+
+      user ? getUserAlbums(userName, frndName); Thread.sleep(sleepdelay)
+      frnd ? getUserAlbums(frndName, userName); Thread.sleep(sleepdelay)
+
+      
       if (false) {
       }
       Thread.sleep(10000)
@@ -297,7 +316,25 @@ object FacebookSimulator {
         user ! u
       }
     }))
-
+    
+    var scupdate: Cancellable = system.scheduler.schedule(FiniteDuration.apply(1, "seconds"), FiniteDuration.apply(scUpdateTime.toLong, "seconds"), (new Runnable {
+      def run {
+        sccount = sccount + 1
+        var r = Random.nextInt(postPhotoPer)
+        var userName = userPrefix + r
+        var user = system.actorSelection(namingPrefix + userName)
+        if(r % 2 == 0)
+        {
+            var a = new Album(userName, userName + "-defaultalbum", None, Some(System.currentTimeMillis().toString()), Option("initial album"), Option("Hyderabad"), Some(System.currentTimeMillis().toString()), None)
+            user ? updateAlbum(a);
+        }
+        else {
+           var u = new User(userName, "First-" + userName+"u", "Last-" + userName+"u", Random.nextInt(100) + 1, Gender.apply(Random.nextInt(Gender.maxId)).toString(), Relation.Single.toString());
+           user ! updateProfile(u);
+        } 
+      }
+    }))
+    
     Thread.sleep(1000000)
     scpost.cancel()
     scalbum.cancel()
@@ -305,19 +342,23 @@ object FacebookSimulator {
     scview.cancel()
     scnewuser.cancel()
     scfrndreq.cancel()
+    scupdate.cancel()
   }
 
   sealed trait seal
 
   case class getPage()
   case class getProfile(userId: String)
+  case class updateProfile(u: User)
   case class addDefaultAlbum()
   case class addDynamicAlbumAndPhoto()
   case class addDefaultImages()
   case class addPhotoToExistingAlbum()
   case class addImage()
   case class addAlbum()
-
+  case class updateAlbum(a: Album)
+  case class deleteAlbum(albumId: String)
+  
   class UserClient(userId: String) extends Actor with SprayJsonSupport with AdditionalFormats with ActorLogging {
     implicit val system = context.system
     import system.dispatcher
@@ -343,6 +384,26 @@ object FacebookSimulator {
             x =>
               {
                 createdUsers.incrementAndGet()
+                x.foreach { res => log.debug(res.entity.asString) }
+              }
+          }
+        }
+        
+      case uu: updateProfile => 
+        {
+          var user = uu.u
+          var userId = user.userId
+          var firstName = user.firstName
+          var lastName = user.lastName
+          var age = user.age
+          var gender = user.gender
+          var relation = user.relation
+          log.debug("Updating user with id " + userId)
+          val result: Future[HttpResponse] = pipeline(Post(Constants.serverURL + "/user", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId", "firstName" : "$firstName" , "lastName" : "$lastName", "age" : $age , "gender" :  "$gender", "relation" :  "$relation"}""")))
+          Await.result(result, timeout.duration)
+          result.onComplete {
+            x =>
+              {
                 x.foreach { res => log.debug(res.entity.asString) }
               }
           }
@@ -382,7 +443,7 @@ object FacebookSimulator {
       }
 
       case gp: getProfile => {
-        val result: Future[HttpResponse] = pipeline(Get(Constants.serverURL + "/profile/" + gp.userId))
+        val result: Future[HttpResponse] = pipeline(Get(Constants.serverURL + "/user" + "?userId=" + gp.userId))
         Await.result(result, timeout.duration)
         result.onComplete {
           x =>
@@ -480,7 +541,40 @@ object FacebookSimulator {
       case a: getUserAlbums => {
         getUserAlbums(a.frndId)
       }
-
+      
+      case da: deleteAlbum => {
+        val result: Future[HttpResponse] =pipeline(Delete(Constants.serverURL + "/user/" + userId + "/albums", "?albumId=" + da.albumId))
+        Await.result(result, timeout.duration)
+        result.onComplete {
+          x =>
+          {
+            x.foreach { res =>
+              log.debug(res.entity.asString)
+            }
+          }
+        }
+      }
+      
+      case ua: updateAlbum => {
+        var a = ua.a
+        var userId = a.userId
+        var albumId = a.albumId
+        var coverPhoto = if (a.coverPhoto.isDefined) a.coverPhoto.get else ""
+        var createdTime = if (a.createdTime.isDefined) a.createdTime.get else ""
+        var description = if (a.description.isDefined) a.description.get else ""
+        var place = if (a.place.isDefined) a.place.get else ""
+        var updateTime = if (a.updateTime.isDefined) a.updateTime.get else ""
+        var result: Future[HttpResponse]  = pipeline(Post(Constants.serverURL + "/user/" + userId + "/albums", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId", "albumId" :"$albumId", "coverPhoto" : "$coverPhoto", "createdTime" : "$createdTime", "description" : "$description", "place":"$place", "updateTime" :"$updateTime"}""")))
+        Await.result(result, timeout.duration)
+        result.onComplete {
+          x =>
+          {
+            x.foreach { res =>
+              log.debug(res.entity.asString)
+            }
+          }
+      }
+      }
     }
 
     def getUserAlbums(frndId: String): Array[Album] = {

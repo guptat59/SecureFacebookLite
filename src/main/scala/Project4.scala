@@ -42,7 +42,6 @@ object FacebookServer extends App with SimpleRoutingApp {
 
   val routes =
     createProfile ~
-      getProfiles ~
       addFriend ~
       getFrndList ~
       addPost ~
@@ -110,29 +109,24 @@ object FacebookServer extends App with SimpleRoutingApp {
                   }
                 }
               }
-            }
-        }
-      }
-    }
-
-  lazy val getProfiles = {
-    jsonRes {
-      get {
-        path("profile" / "[a-zA-Z0-9]*".r) { userId =>
-          complete {
-            val f = Await.result(FBServers ? findProfile(userId), timeout.duration)
-            if (f.isInstanceOf[User]) {
-              f.asInstanceOf[User]
-            } else if (f.isInstanceOf[Error]) {
-              f.asInstanceOf[Error]
-            } else {
-              Error("Failed due to internal error")
-            }
+            } ~
+            get {
+               parameters("userId") { userId =>
+                complete {
+                  val f = Await.result(FBServers ? findProfile(userId), timeout.duration)
+                  if (f.isInstanceOf[User]) {
+                    f.asInstanceOf[User]
+                  } else if (f.isInstanceOf[Error]) {
+                    f.asInstanceOf[Error]
+                  } else {
+                    Error("Failed due to internal error")
+                  }
+                }
+             }
           }
         }
       }
     }
-  }
 
   lazy val addPost = {
     jsonRes {
@@ -245,21 +239,6 @@ object FacebookServer extends App with SimpleRoutingApp {
               }
             }
           } ~
-          delete {
-            parameters("albumId") { albumId =>
-              complete {
-                //no check for userid 
-                var f = Await.result(FBServers ? deleteAlbum(userId, albumId), timeout.duration)
-                if (f.isInstanceOf[Success]) {
-                  f.asInstanceOf[Success]
-                } else if (f.isInstanceOf[Error]) {
-                  f.asInstanceOf[Error]
-                } else {
-                  Error("Failed due to internal error")
-                }
-              }
-            }
-          } ~
           post {
             entity(as[Album]) { album =>
               complete {
@@ -285,9 +264,9 @@ object FacebookServer extends App with SimpleRoutingApp {
   lazy val postPhoto = {
     jsonRes {
 
-      put {
+      path("user" / "[a-zA-Z0-9]*".r / "albums" / "photo") { userId =>
+        put {
         //have to pass json but the concept remains the same. photo inside an album
-        path("user" / "[a-zA-Z0-9]*".r / "albums" / "photo") { userId =>
           entity(as[Photo]) { photo =>
             complete {
               var f = Await.result(FBServers ? photo, timeout.duration)
@@ -300,38 +279,25 @@ object FacebookServer extends App with SimpleRoutingApp {
               }
             }
           }
-        }
-
       } ~
-        post {
-          complete {
-            Error("TODO")
-          }
-        } ~
-        delete {
-          complete {
-            Error("TODO")
-          }
-        }
-
-    }
-  }
-
-  lazy val getPhoto = {
-    get_JsonRes {
       get {
-        path("albums" / IntNumber / "photos" / IntNumber) { (albumId, photoId) =>
+        parameters("photoId") { photoId =>
           complete {
-            //send the photo.
-
-            //extend to getPhotos if needed.
-            "done"
+            var f = Await.result(FBServers ? getPhotos(photoId),timeout.duration)
+            if (f.isInstanceOf[Photo]) {
+                    f.asInstanceOf[Photo]
+            } else if (f.isInstanceOf[Error]) {
+                    f.asInstanceOf[Error]
+            } else {
+                    Error("Failed due to internal error")
+            }
           }
         }
       }
     }
   }
-
+ }
+  
   var userbase = new ParHashMap[String, UserInfo]()
 
   class FBServer extends Actor with ActorLogging {
@@ -517,8 +483,16 @@ object FacebookServer extends App with SimpleRoutingApp {
           }
         }
       }
-    }
 
+    case gp: getPhotos => {
+        var user = userbase.get(gp.photoId)
+        if (user.isEmpty || gp.photoId.isEmpty()) {
+          sender ! Error(Constants.messages.noUser)
+        } else {
+          sender ! user.get.getUserAlbumPhoto(user.get.userId, "", gp.photoId)
+        }
+      }
+    }
     //Helper methods
     def createUserWithID(u: User): UserInfo = {
       var user = new UserInfo(u.userId);

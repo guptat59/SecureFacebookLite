@@ -31,3 +31,11 @@ From the above source, it is understood that there are 1.5billion total monthly 
        8) scheduler time for new profile = 60sec/numofnewusers per min 
        9) scheduler time for new friend request = 60secs
        10) scheduler time for viewing profiles, home page, albums = 0.01 sec
+      
+      Ideal case, 
+      	1) TotalUsers = 10,000
+      	2) Active Users = 6666
+	3) num of posts = 4000 /hr or 70 /min
+	4) num of photos = 2000 /hr or 35 /min
+	5) scheduler time for posts = 0.86 sec
+	6) scheduler time for images = 1.6 sec
