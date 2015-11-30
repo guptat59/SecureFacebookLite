@@ -57,16 +57,21 @@ object FacebookSimulator {
 
   val userPrefix = "user"
   val totalUsers = Constants.totalUsers
-  val activeUsers = (2 / 3) * totalUsers
-  val posts = (3 / 5) * activeUsers
+  println("tu" + totalUsers)
+  val activeUsers = ((2 * totalUsers) / 3) 
+  println("au" + activeUsers)
+  val posts = ((3 * activeUsers) / 5) 
+  println("po" + posts)
   val newuser = if (totalUsers * 0.000005 < 1) 1 else totalUsers * 0.000005
+  println("nu" + newuser)
   val scPostTime = (60 * 60) / posts
+  println("tu" + totalUsers)
   val scPhotoTime = 2 * scPostTime
   val scNewUser = 60 / newuser
   val scFrndReq = 60
   val scView = 0.01
-  val postUserPer = 25 / 100 * (activeUsers)
-  val postPhotoPer = 40 / 100 * (activeUsers)
+  val postUserPer = (25 * activeUsers)/ 100 
+  val postPhotoPer = (40 * activeUsers) / 100 
   val viewPer = totalUsers
 
   def main(args: Array[String]) {
