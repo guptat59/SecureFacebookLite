@@ -126,8 +126,8 @@ object FacebookSimulator {
 
       println("UserPost >> ")
 
-      user ? UserPost(userName, "post by " + userName, Option("google1"), Option("Paris"), Privacy.Friends, Some("uuid")); Thread.sleep(sleepdelay)
-      frnd ? UserPost(frndName, "post by " + frndName, Option("google2"), Option("London"), Privacy.Friends, Some("uuid")); Thread.sleep(sleepdelay)
+      //user ? UserPost(userName, "post by " + userName, Option("google1"), Option("Paris"), Privacy.Friends, Some("uuid")); Thread.sleep(sleepdelay)
+      //frnd ? UserPost(frndName, "post by " + frndName, Option("google2"), Option("London"), Privacy.Friends, Some("uuid")); Thread.sleep(sleepdelay)
 
       println("get profile >> ")
 
@@ -253,7 +253,7 @@ object FacebookSimulator {
         var userName = userPrefix + (Random.nextInt(postUserPer))
         println(userName + " scpost")
         var user = system.actorSelection(namingPrefix + userName)
-        user ! UserPost(userName, "post", None, None, Privacy.Friends, None)
+        user ! UserPost(userName, Security.encrypt("Post", userName), None, None, Privacy.Friends, None)
       }
     }))
 
@@ -371,6 +371,7 @@ object FacebookSimulator {
       //(userId: String, firstName: String, lastName: String, age: Int, gender: String)
       case u: User =>
         {
+          Security.generateKey(u.userId)
           var userId = u.userId
           var firstName = u.firstName
           var lastName = u.lastName
