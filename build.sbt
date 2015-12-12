@@ -25,4 +25,3 @@ libraryDependencies ++= Seq(
   "org.mockito" % "mockito-all" % "1.9.5" % "test",
   "com.typesafe.scala-logging" %% "scala-logging" % "3.1.0"
 )
-

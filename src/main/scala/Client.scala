@@ -358,7 +358,7 @@ object FacebookSimulator {
   case class addAlbum()
   case class updateAlbum(a: Album)
   case class deleteAlbum(albumId: String)
-  
+
   class UserClient(userId: String) extends Actor with SprayJsonSupport with AdditionalFormats with ActorLogging {
     implicit val system = context.system
     import system.dispatcher

@@ -92,7 +92,6 @@ object FacebookServer extends App with SimpleRoutingApp {
                   Error("User already exists!")
                 }
               }
-
             }
           } ~
             post {
@@ -437,7 +436,7 @@ object FacebookServer extends App with SimpleRoutingApp {
       }
 
       case da: deleteAlbum => {
-        var user = userbase.get(da.userId)
+         var user = userbase.get(da.userId)
         if (user.isEmpty) {
           sender ! Error(Constants.messages.noUser)
         } else {
