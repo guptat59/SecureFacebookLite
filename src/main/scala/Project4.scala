@@ -1,41 +1,37 @@
-import java.nio.file.Files
-import java.nio.file.Paths
-import java.util.HashMap
-import java.util.UUID
-import scala.collection.mutable.ListBuffer
-import scala.collection.parallel.mutable.ParHashMap
-import scala.concurrent.Await
-import scala.util.Random
+import java.security.{KeyFactory, PublicKey}
+import java.security.spec.X509EncodedKeySpec
+import java.util
+import java.util.{HashMap, UUID}
+import java.util.concurrent.ConcurrentHashMap
 import org.apache.commons.codec.binary.Base64
-import org.slf4j.LoggerFactory
-import com.typesafe.scalalogging.slf4j.Logger
-import akka.actor.Actor
-import akka.actor.ActorLogging
-import akka.actor.ActorSystem
-import akka.actor.Props
-import akka.actor.actorRef2Scala
+
+
+import akka.actor.{Actor, ActorLogging, ActorSystem, Props, actorRef2Scala}
 import akka.pattern.ask
 import akka.routing.SmallestMailboxPool
 import akka.util.Timeout
-import jsonProtocol.sprayJsonMarshaller
-import jsonProtocol.sprayJsonUnmarshaller
-import spray.http.MediaTypes
+import com.typesafe.config.ConfigFactory
+import com.typesafe.scalalogging.slf4j.Logger
+import org.slf4j.LoggerFactory
+import spray.http.{HttpCookie, MediaTypes}
 import spray.httpx.marshalling.ToResponseMarshallable.isMarshallable
 import spray.routing.Directive.pimpApply
-import spray.routing.Route
-import spray.routing.SimpleRoutingApp
-import spray.routing.directives.DetachMagnet.fromUnit
-import com.typesafe.config.ConfigFactory
+import spray.routing.{Route, SimpleRoutingApp}
+
+import scala.collection.mutable.ListBuffer
+import scala.collection.parallel.mutable.ParHashMap
+import scala.concurrent.Await
 
 object FacebookServer extends App with SimpleRoutingApp {
 
-  val actorConf = """
+  val actorConf =
+    """
   akka {
     #log-config-on-start = on
     stdout-loglevel = "INFO"
-    loglevel = "DEBUG"    
+    loglevel = "INFO"
   }
-  """
+    """
 
   implicit val system = ActorSystem("FacebookServer", ConfigFactory.parseString(actorConf))
   implicit val timeout = Timeout(1000000)
@@ -47,7 +43,8 @@ object FacebookServer extends App with SimpleRoutingApp {
       addPost ~
       getPage ~
       album ~
-      postPhoto
+      postPhoto ~
+      auth
 
   import jsonProtocol._
 
@@ -64,68 +61,135 @@ object FacebookServer extends App with SimpleRoutingApp {
   }
 
   def jsonRes(route: Route) = {
-    respondWithMediaType(MediaTypes.`application/json`) { detach() { route } }
+    cookie("userIdToken") { cookieUserId =>
+      respondWithMediaType(MediaTypes.`application/json`) {
+        detach() {
+          route
+        }
+      }
+    }
   }
 
   def get_JsonRes(route: Route) = get {
-    respondWithMediaType(MediaTypes.`application/json`) { detach() { route } }
+    cookie("userIdToken") { cookieUserId =>
+      respondWithMediaType(MediaTypes.`application/json`) {
+        detach() {
+          route
+        }
+      }
+    }
   }
 
   def post_JsonRes(route: Route) = post {
-    respondWithMediaType(MediaTypes.`application/json`) { detach() { route } }
+    cookie("userIdToken") { cookieUserId =>
+      respondWithMediaType(MediaTypes.`application/json`) {
+        detach() {
+          route
+        }
+      }
+    }
   }
 
-  lazy val createProfile =
-    {
-      jsonRes {
-        path("user") {
-          put {
+  //to be verified userId vs token number.
+  var toBeVerifiedTokens = new util.HashMap[String, String]()
+  //Verified userName vs public keys
+  var userIdPublicKeys = new ConcurrentHashMap[String, PublicKey]()
+
+  def decodeKey(publicKey: String): PublicKey = {
+    var publicBytes = Base64.decodeBase64(publicKey);
+    var keySpec = new X509EncodedKeySpec(publicBytes);
+    var keyFactory = KeyFactory.getInstance("RSA");
+    var pubKey = keyFactory.generatePublic(keySpec);
+    pubKey
+  }
+
+  lazy val auth = {
+    post {
+      path("auth" / "request") {
+        entity(as[AuthReq]) { auth =>
+          complete {
+            var uuid = UUID.randomUUID().toString()
+            var encryptedContent = Security.encrypt(uuid, decodeKey(auth.key))
+            toBeVerifiedTokens.put(auth.userId, uuid)
+            encryptedContent
+          }
+        }
+      } ~
+        path("auth" / "verify") {
+          entity(as[AuthToken]) { auth =>
+            if (toBeVerifiedTokens.get(auth.userId).equals(auth.token)) {
+              toBeVerifiedTokens.remove(auth.userId)
+              setCookie(HttpCookie("userIdToken", auth.userId)) {
+                println("User verified on server")
+                complete("true")
+              }
+            } else {
+              println("User rejected on server")
+              complete("false")
+            }
+          }
+        }
+    }
+  }
+
+  lazy val createProfile = {
+    jsonRes {
+      path("user") {
+        put {
+          entity(as[User]) { newUsr =>
+            complete {
+              if (!userbase.contains(newUsr.userId)) {
+                val f = Await.result(FBServers ? newUsr, timeout.duration)
+                if (f.isInstanceOf[Success]) {
+                  f.asInstanceOf[Success]
+                }
+                else if (f.isInstanceOf[Error]) {
+                  f.asInstanceOf[Error]
+                }
+                else
+                  Error("Failed due to internal error2")
+              } else {
+                Error("User already exists!")
+              }
+            }
+          }
+        } ~
+          post {
             entity(as[User]) { newUsr =>
               complete {
-                if (!userbase.contains(newUsr.userId)) {
-                  val f = Await.result(FBServers ? newUsr, timeout.duration);
-                  if (f.isInstanceOf[Success]) { f.asInstanceOf[Success] }
-                  else if (f.isInstanceOf[Error]) { f.asInstanceOf[Error] }
+                if (userbase.contains(newUsr.userId)) {
+                  val f = Await.result(FBServers ? newUsr, timeout.duration)
+                  if (f.isInstanceOf[Success]) {
+                    f.asInstanceOf[Success]
+                  }
+                  else if (f.isInstanceOf[Error]) {
+                    f.asInstanceOf[Error]
+                  }
                   else
                     Error("Failed due to internal error2")
                 } else {
-                  Error("User already exists!")
+                  Error("User doesnt exist!")
                 }
               }
             }
           } ~
-            post {
-              entity(as[User]) { newUsr =>
-                complete {
-                  if (userbase.contains(newUsr.userId)) {
-                    val f = Await.result(FBServers ? newUsr, timeout.duration);
-                    if (f.isInstanceOf[Success]) { f.asInstanceOf[Success] }
-                    else if (f.isInstanceOf[Error]) { f.asInstanceOf[Error] }
-                    else
-                      Error("Failed due to internal error2")
-                  } else {
-                    Error("User doesnt exist!")
-                  }
+          get {
+            parameters("userId") { userId =>
+              complete {
+                val f = Await.result(FBServers ? findProfile(userId), timeout.duration)
+                if (f.isInstanceOf[User]) {
+                  f.asInstanceOf[User]
+                } else if (f.isInstanceOf[Error]) {
+                  f.asInstanceOf[Error]
+                } else {
+                  Error("Failed due to internal error")
                 }
               }
-            } ~
-            get {
-               parameters("userId") { userId =>
-                complete {
-                  val f = Await.result(FBServers ? findProfile(userId), timeout.duration)
-                  if (f.isInstanceOf[User]) {
-                    f.asInstanceOf[User]
-                  } else if (f.isInstanceOf[Error]) {
-                    f.asInstanceOf[Error]
-                  } else {
-                    Error("Failed due to internal error")
-                  }
-                }
-             }
+            }
           }
-        }
       }
     }
+  }
 
   lazy val addPost = {
     jsonRes {
@@ -172,7 +236,7 @@ object FacebookServer extends App with SimpleRoutingApp {
       path("user" / "[a-zA-Z0-9]*".r / "addfriend") { userId =>
         entity(as[FriendRequest]) { frndreq =>
           complete {
-            val f = Await.result(FBServers ? frndreq, timeout.duration);
+            val f = Await.result(FBServers ? frndreq, timeout.duration)
             if (f.isInstanceOf[UsersList])
               f.asInstanceOf[UsersList]
             else if (f.isInstanceOf[Error])
@@ -262,10 +326,9 @@ object FacebookServer extends App with SimpleRoutingApp {
 
   lazy val postPhoto = {
     jsonRes {
-
       path("user" / "[a-zA-Z0-9]*".r / "albums" / "photo") { userId =>
         put {
-        //have to pass json but the concept remains the same. photo inside an album
+          //have to pass json but the concept remains the same. photo inside an album
           entity(as[Photo]) { photo =>
             complete {
               var f = Await.result(FBServers ? photo, timeout.duration)
@@ -278,31 +341,31 @@ object FacebookServer extends App with SimpleRoutingApp {
               }
             }
           }
-      } ~
-      get {
-        parameters("photoId") { photoId =>
-          complete {
-            var f = Await.result(FBServers ? getPhotos(photoId),timeout.duration)
-            if (f.isInstanceOf[Photo]) {
-                    f.asInstanceOf[Photo]
-            } else if (f.isInstanceOf[Error]) {
-                    f.asInstanceOf[Error]
-            } else {
-                    Error("Failed due to internal error")
+        } ~
+          get {
+            parameters("photoId") { photoId =>
+              complete {
+                var f = Await.result(FBServers ? getPhotos(photoId), timeout.duration)
+                if (f.isInstanceOf[Photo]) {
+                  f.asInstanceOf[Photo]
+                } else if (f.isInstanceOf[Error]) {
+                  f.asInstanceOf[Error]
+                } else {
+                  Error("Failed due to internal error")
+                }
+              }
             }
           }
-        }
       }
     }
   }
- }
-  
+
+
   var userbase = new ParHashMap[String, UserInfo]()
 
   class FBServer extends Actor with ActorLogging {
 
     def receive = {
-
       case u: User => {
         var userId = u.userId
         if (!userbase.contains(userId)) {
@@ -409,7 +472,7 @@ object FacebookServer extends App with SimpleRoutingApp {
       case aa: Album => {
         var user = userbase.get(aa.userId)
 
-        var isSuccess = false;
+        var isSuccess = false
 
         if (user.isEmpty) {
           sender ! Error(Constants.messages.noUser)
@@ -423,7 +486,7 @@ object FacebookServer extends App with SimpleRoutingApp {
               sender ! Error(Constants.messages.noAlbum)
             }
           } else {
-            isSuccess = user.get.addAlbumToUser(aa.userId, aa);
+            isSuccess = user.get.addAlbumToUser(aa.userId, aa)
             if (isSuccess) {
               //  Add this album permission to friends TODO
               sender ! Success(Constants.messages.albumCreated + aa.albumId)
@@ -436,7 +499,7 @@ object FacebookServer extends App with SimpleRoutingApp {
       }
 
       case da: deleteAlbum => {
-         var user = userbase.get(da.userId)
+        var user = userbase.get(da.userId)
         if (user.isEmpty) {
           sender ! Error(Constants.messages.noUser)
         } else {
@@ -483,7 +546,7 @@ object FacebookServer extends App with SimpleRoutingApp {
         }
       }
 
-    case gp: getPhotos => {
+      case gp: getPhotos => {
         var user = userbase.get(gp.photoId)
         if (user.isEmpty || gp.photoId.isEmpty()) {
           sender ! Error(Constants.messages.noUser)
@@ -492,9 +555,10 @@ object FacebookServer extends App with SimpleRoutingApp {
         }
       }
     }
+
     //Helper methods
     def createUserWithID(u: User): UserInfo = {
-      var user = new UserInfo(u.userId);
+      var user = new UserInfo(u.userId)
       user.insertData(u.age, u.firstName, u.lastName, u.gender, u.relation)
       user
     }
@@ -504,16 +568,16 @@ object FacebookServer extends App with SimpleRoutingApp {
   class UserInfo(val userId: String, var age: Int = -1, var firstName: String = "", var lastName: String = "", var gender: String = "NA", var relation: String = "") {
 
     /**
-     * Listbuffer internally uses list
-     * head - Constant time
-     * tail - Linear time
-     * apply - Linear time
-     * update - Linear time
-     * prepend - Constant time
-     * append - Constant time
-     * insert - Linear time
-     * toList - Constant time
-     */
+      * Listbuffer internally uses list
+      * head - Constant time
+      * tail - Linear time
+      * apply - Linear time
+      * update - Linear time
+      * prepend - Constant time
+      * append - Constant time
+      * insert - Linear time
+      * toList - Constant time
+      */
 
     var posts = new ListBuffer[UserPost]()
     var friendList = new ListBuffer[String]()
@@ -547,7 +611,7 @@ object FacebookServer extends App with SimpleRoutingApp {
     }
 
     def getPublicProfile(): User = {
-      User(userId, firstName, lastName, age, gender, relation);
+      User(userId, firstName, lastName, age, gender, relation)
     }
 
     def getFriendList(): ListBuffer[String] = {
@@ -560,7 +624,7 @@ object FacebookServer extends App with SimpleRoutingApp {
         log.error("Album already added!!")
         false
       } else {
-        userAlbums.append(album.albumId);
+        userAlbums.append(album.albumId)
         var picAlbum = new PictureAlbum(userId, album.albumId)
         picAlbum.populate(album.coverPhoto, album.description, album.place)
         albumStore.put(album.albumId, picAlbum)
@@ -601,7 +665,7 @@ object FacebookServer extends App with SimpleRoutingApp {
         } else {
           // When security is implemented, content will be encrypted so it doesn't not matter to validate.
           var album: PictureAlbum = albumStore.get(albumId)
-          var pic = new Picture(albumId, photo.photoId, photo.src);
+          var pic = new Picture(albumId, photo.photoId, photo.src)
           pic.populate(photo.message, photo.place)
           album.addPicture(pic)
           photoStore.put(pic.photoId, pic)
@@ -625,7 +689,7 @@ object FacebookServer extends App with SimpleRoutingApp {
     }
 
     def getUserAlbums(): Array[Album] = {
-      var a = userAlbums;
+      var a = userAlbums
       var it = a.iterator
       var albums = Array[Album]()
       while (it.hasNext) {
@@ -638,7 +702,7 @@ object FacebookServer extends App with SimpleRoutingApp {
 
     def getUserAlbumPhotos(userId: String, albumId: String): Array[Photo] = {
       // Need not verify userId, albumId as content will be encrypted
-      var a = albumStore.get(albumId);
+      var a = albumStore.get(albumId)
       var it = a.photos.iterator
       var pics = Array[Photo]()
       while (it.hasNext) {
@@ -656,4 +720,5 @@ object FacebookServer extends App with SimpleRoutingApp {
     }
 
   }
+
 }

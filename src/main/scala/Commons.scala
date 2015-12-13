@@ -7,12 +7,16 @@ import spray.json.NullOptions
 import spray.json.RootJsonFormat
 import spray.json.pimpAny
 import scala.collection.mutable.ListBuffer
+import java.security.Key
 
 object Constants {
 
   val serverPort = 9443
   val serverHost = "localhost"
   val serverURL = "http://" + serverHost + ":" + serverPort
+
+  val ALGORITHM: String = "RSA"
+  val charset : String = "ISO-8859-1"
 
   val totalUsers = 10
   val numOfFriends = (2 * (totalUsers / 100)).toInt + 5
@@ -75,13 +79,15 @@ object UserLoginJsonSupport extends DefaultJsonProtocol with SprayJsonSupport {
 case class User(userId: String, firstName: String, lastName: String, age: Int, gender: String, relation: String)
 case class FriendRequest(userId: String, frndId: String)
 case class UsersList(userIds: Array[String])
-case class UserPost(postby : String, message: Array[Byte], link: Option[String] = None, place: Option[String] = None, privacy: String, object_attachment: Option[String] = None, Type: Option[String] = Option(Constants.PostTypes.Default))
+case class UserPost(postby : String, message: String, link: Option[String] = None, place: Option[String] = None, privacy: String, object_attachment: Option[String] = None, Type: Option[String] = Option(Constants.PostTypes.Default))
 case class PostAdded(uuid: String, message: String)
 case class UserPage(posts: Array[UserPost])
 case class Album(userId: String, albumId: String, coverPhoto: Option[String] = None, createdTime: Option[String] = None, description: Option[String] = None, place: Option[String] = None, updateTime: Option[String] = None, var photos: Option[Array[String]] = None)
-case class Photo(userId: String, albumId: String, photoId: String, src: Array[Byte], message: Option[String] = None, place: Option[String] = None, noStory: Boolean = false)
+case class Photo(userId: String, albumId: String, photoId: String, src: String, message: Option[String] = None, place: Option[String] = None, noStory: Boolean = false)
 case class Success(reason: String)
 case class Error(reason: String)
+case class AuthReq(userId: String, key : String)
+case class AuthToken(userId: String, token : String)
 
 object jsonProtocol extends DefaultJsonProtocol with SprayJsonSupport with NullOptions with AdditionalFormats {
   implicit val FriendReqFormat = jsonFormat2(FriendRequest)
@@ -90,6 +96,7 @@ object jsonProtocol extends DefaultJsonProtocol with SprayJsonSupport with NullO
     def read(value: JsValue) = UsersList(value.convertTo[Array[String]])
     def write(f: UsersList) = f.userIds.toJson
   }
+
   implicit val UserFormat = jsonFormat6(User)
   implicit val postFormat = jsonFormat7(UserPost)
   implicit val postAddedFormat = jsonFormat2(PostAdded)
@@ -102,6 +109,9 @@ object jsonProtocol extends DefaultJsonProtocol with SprayJsonSupport with NullO
   implicit val photoFormat = jsonFormat7(Photo)
   implicit val errorFormat = jsonFormat1(Error)
   implicit val successFormat = jsonFormat1(Success)
+  implicit val AuthReqFormat = jsonFormat2(AuthReq)
+  implicit val AuthTokenFormat = jsonFormat2(AuthToken)
+
 }
 
 case class findProfile(userId: String)
@@ -145,7 +155,7 @@ class PictureAlbum(val ownerId: String, val albumId: String) {
 
 }
 
-class Picture(val albumId: String, val photoId: String, val src: Array[Byte]) {
+class Picture(val albumId: String, val photoId: String, val src: String) {
 
   var message: Option[String] = None
   var place: Option[String] = None
