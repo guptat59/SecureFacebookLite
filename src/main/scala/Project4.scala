@@ -109,7 +109,7 @@ object FacebookServer extends App with SimpleRoutingApp {
         entity(as[AuthReq]) { auth =>
           complete {
             var uuid = UUID.randomUUID().toString()
-            var encryptedContent = Security.encrypt(uuid, decodeKey(auth.key))
+            var encryptedContent = Security.encryptRSA(uuid, decodeKey(auth.key))
             toBeVerifiedTokens.put(auth.userId, uuid)
             encryptedContent
           }
@@ -359,7 +359,6 @@ object FacebookServer extends App with SimpleRoutingApp {
       }
     }
   }
-
 
   var userbase = new ParHashMap[String, UserInfo]()
 

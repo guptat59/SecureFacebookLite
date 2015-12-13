@@ -11,12 +11,12 @@ import java.security.Key
 
 object Constants {
 
-  val serverPort = 9443
+  val serverPort = 9444
   val serverHost = "localhost"
   val serverURL = "http://" + serverHost + ":" + serverPort
 
   val ALGORITHM: String = "RSA"
-  val charset : String = "ISO-8859-1"
+  val charset: String = "ISO-8859-1"
 
   val totalUsers = 10
   val numOfFriends = (2 * (totalUsers / 100)).toInt + 5
@@ -66,9 +66,19 @@ object Gender extends Enumeration {
   val Male, Female = Value
 }
 
+object Notification {
+  val PostType = "Post"
+  val ProfileType = "Profile"
+  val PhotoType = "Photo"
+  val FriendAddType = "FriendAdd"
+}
+
+case class Notify(notifyType: String, key: String, value: String)
+
 sealed trait Seal
 
 case class UserLogin(username: String, password: String)
+
 object UserLoginJsonSupport extends DefaultJsonProtocol with SprayJsonSupport {
   implicit val PortofolioFormats = jsonFormat2(UserLogin)
 }
@@ -77,34 +87,50 @@ object UserLoginJsonSupport extends DefaultJsonProtocol with SprayJsonSupport {
 //found : Any required: spray.httpx.marshalling.ToResponseMarshallable
 
 case class User(userId: String, firstName: String, lastName: String, age: Int, gender: String, relation: String)
+
 case class FriendRequest(userId: String, frndId: String)
+
 case class UsersList(userIds: Array[String])
-case class UserPost(postby : String, message: String, link: Option[String] = None, place: Option[String] = None, privacy: String, object_attachment: Option[String] = None, Type: Option[String] = Option(Constants.PostTypes.Default))
+
+case class UserPost(postby: String, message: String, link: Option[String] = None, place: Option[String] = None, privacy: String, object_attachment: Option[String] = None, Type: Option[String] = Option(Constants.PostTypes.Default))
+
 case class PostAdded(uuid: String, message: String)
+
 case class UserPage(posts: Array[UserPost])
+
 case class Album(userId: String, albumId: String, coverPhoto: Option[String] = None, createdTime: Option[String] = None, description: Option[String] = None, place: Option[String] = None, updateTime: Option[String] = None, var photos: Option[Array[String]] = None)
+
 case class Photo(userId: String, albumId: String, photoId: String, src: String, message: Option[String] = None, place: Option[String] = None, noStory: Boolean = false)
+
 case class Success(reason: String)
+
 case class Error(reason: String)
-case class AuthReq(userId: String, key : String)
-case class AuthToken(userId: String, token : String)
+
+case class AuthReq(userId: String, key: String)
+
+case class AuthToken(userId: String, token: String)
 
 object jsonProtocol extends DefaultJsonProtocol with SprayJsonSupport with NullOptions with AdditionalFormats {
   implicit val FriendReqFormat = jsonFormat2(FriendRequest)
 
   implicit object NewUsersResFormat extends RootJsonFormat[UsersList] {
     def read(value: JsValue) = UsersList(value.convertTo[Array[String]])
+
     def write(f: UsersList) = f.userIds.toJson
   }
 
   implicit val UserFormat = jsonFormat6(User)
   implicit val postFormat = jsonFormat7(UserPost)
   implicit val postAddedFormat = jsonFormat2(PostAdded)
+
   implicit object postList extends RootJsonFormat[UserPage] {
     def read(value: JsValue) = UserPage(value.convertTo[Array[UserPost]])
+
     def write(f: UserPage) = f.posts.toJson
   }
+
   implicit def userPageFormat[Post: JsonFormat] = jsonFormat1(UserPage.apply)
+
   implicit val albumFormat = jsonFormat8(Album)
   implicit val photoFormat = jsonFormat7(Photo)
   implicit val errorFormat = jsonFormat1(Error)
@@ -115,12 +141,20 @@ object jsonProtocol extends DefaultJsonProtocol with SprayJsonSupport with NullO
 }
 
 case class findProfile(userId: String)
-case class addPost(postId: String, userId: String, post: UserPost) //extends Seal
+
+case class addPost(postId: String, userId: String, post: UserPost)
+
+//extends Seal
 case class getUserPage(userId: String)
+
 case class getFriendsList(userId: String, frndId: String)
+
 case class deleteAlbum(userId: String, albumId: String)
+
 case class getPhotos(photoId: String)
+
 case class getUserAlbums(userId: String, frndId: String)
+
 case class systemSetup()
 
 class PictureAlbum(val ownerId: String, val albumId: String) {

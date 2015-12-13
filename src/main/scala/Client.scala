@@ -1,6 +1,7 @@
 import java.nio.file.{Files, Paths}
 import java.security.{KeyPairGenerator, PrivateKey, PublicKey}
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import javax.crypto.Cipher
 
@@ -206,6 +207,9 @@ object FacebookSimulator {
     var user = system.actorOf(Props(new UserClient(userId, publicKey, privateKey)), userId)
     var u = new User(userId, "First-" + userId, "Last-" + userId, Random.nextInt(100) + 1, Gender.apply(Random.nextInt(Gender.maxId)).toString(), Relation.Single.toString())
     user ! u
+    user ! UserPost(userId, "post by " + userId, Option("google1"), Option("Paris"), Privacy.Friends, Some("uuid"))
+
+
   }
 
 
@@ -274,10 +278,10 @@ object FacebookSimulator {
       def run {
         val usercount = sccount + totalUsers
         var userName = userPrefix + usercount
-       // var user = system.actorOf(Props(new UserClient(userName)), userName)
-       // println(userName + " scnewuser")
-       // var u = new User(userName, "First-" + userName, "Last-" + userName, Random.nextInt(100) + 1, Gender.apply(Random.nextInt(Gender.maxId)).toString(), Relation.Single.toString());
-      //  user ! u
+        // var user = system.actorOf(Props(new UserClient(userName)), userName)
+        // println(userName + " scnewuser")
+        // var u = new User(userName, "First-" + userName, "Last-" + userName, Random.nextInt(100) + 1, Gender.apply(Random.nextInt(Gender.maxId)).toString(), Relation.Single.toString());
+        //  user ! u
       }
     }))
 
@@ -370,16 +374,27 @@ object FacebookSimulator {
   sealed trait seal
 
   case class getPage()
+
   case class getProfile(userId: String)
+
   case class updateProfile(u: User)
+
   case class addDefaultAlbum()
+
   case class addDynamicAlbumAndPhoto()
+
   case class addDefaultImages()
+
   case class addPhotoToExistingAlbum()
+
   case class addImage()
+
   case class addAlbum()
+
   case class updateAlbum(a: Album)
+
   case class deleteAlbum(albumId: String)
+
 
   class UserClient(userId: String, publicKey: PublicKey, privateKey: PrivateKey) extends Actor with SprayJsonSupport with AdditionalFormats with ActorLogging {
     implicit val system = context.system
@@ -393,12 +408,12 @@ object FacebookSimulator {
     def authenticate(): Boolean = {
       log.info("Userid : " + userId + " key " + Security.getPublicKey(userId))
       var publicKeyStr = Base64.encodeBase64String(publicKey.getEncoded())
-      var response: HttpResponse = Await.result(pipeline(Post(Constants.serverURL + "/auth/request", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId", "key" : "$publicKeyStr"}"""))),timeout.duration)
+      var response: HttpResponse = Await.result(pipeline(Post(Constants.serverURL + "/auth/request", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId", "key" : "$publicKeyStr"}"""))), timeout.duration)
       var encryptedContent = response.entity.asString
       log.info("To be decrypted : " + encryptedContent)
       var token = decryptUsingPrivate(encryptedContent)
 
-      response = Await.result(pipeline(Post(Constants.serverURL + "/auth/verify",HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId", "token" : "$token"}"""))),timeout.duration)
+      response = Await.result(pipeline(Post(Constants.serverURL + "/auth/verify", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId", "token" : "$token"}"""))), timeout.duration)
       if (response.entity.asString.toBoolean) {
         var httpCookie = response.headers.collect { case spray.http.HttpHeaders.`Set-Cookie`(hc) => hc }
         pipeline = addHeader(spray.http.HttpHeaders.Cookie(httpCookie)) ~> sendReceive
@@ -409,6 +424,16 @@ object FacebookSimulator {
         false
       }
     }
+
+    //userId vs AES Key
+    var profileKeys = new ConcurrentHashMap[String, String]()
+    // post uuid vs AES Key
+    var postKeys = new ConcurrentHashMap[String, String]()
+    // photo uuid vs AES Key
+    var photoKeys = new ConcurrentHashMap[String, String]()
+    // user friends
+    var userFriends = new ConcurrentHashMap[String, String]()
+
 
     def receive = {
 
@@ -430,6 +455,19 @@ object FacebookSimulator {
             createdUsers.incrementAndGet()
             x.foreach { res => log.debug(res.entity.asString) }
           }
+        }
+      }
+
+      case n: Notify => {
+        n.notifyType match {
+          case Notification.ProfileType =>
+            profileKeys.put(n.key, n.value)
+          case Notification.PostType =>
+            postKeys.put(n.key, n.value)
+          case Notification.PhotoType =>
+            photoKeys.put(n.key, n.value)
+          case Notification.FriendAddType =>
+            frndsAdded.put(n.key, n.value)
         }
       }
 
@@ -466,20 +504,25 @@ object FacebookSimulator {
       }
 
       case ap: UserPost => {
-        var message = ap.message
+        var ar = Security.encryptAES(ap.message, publicKey)
+        var message = ar.ciphedData
         var link = ap.link
         var object_attachment = ap.object_attachment
         var place = ap.place
         var privacy = ap.privacy
         var postBy = ap.postby
 
-        val result: Future[HttpResponse] = pipeline(Put(Constants.serverURL + "/user/" + userId + "/feed", HttpEntity(MediaTypes.`application/json`, s"""{"postby": "$postBy", "message": "$message", "link": "$link", "place": "$place", "privacy": "$privacy", "object_attachment": "$object_attachment"}""")))
-        Await.result(result, timeout.duration)
-        result.onComplete {
-          x => {
-            x.foreach { res => log.debug(res.entity.asString) }
-          }
-        }
+        val result: HttpResponse = Await.result(pipeline(Put(Constants.serverURL + "/user/" + userId + "/feed", HttpEntity(MediaTypes.`application/json`, s"""{"postby": "$postBy", "message": "$message", "link": "$link", "place": "$place", "privacy": "$privacy", "object_attachment": "$object_attachment"}"""))), timeout.duration)
+
+        import jsonProtocol._
+        import spray.json._
+        import DefaultJsonProtocol._
+
+        var s = result.entity.asString.parseJson.convertTo[PostAdded]
+
+        notify(Notification.PostType, s.uuid, Security.encryptRSA(ar.secretKey, ""))
+
+        log.debug(result.entity.asString)
       }
 
       case gp: getProfile => {
@@ -542,7 +585,7 @@ object FacebookSimulator {
         }
       }
 
-      case a: addDefaultImages =>
+      case a: addDefaultImages => {
         var src = readImage()
         //userId: String, albumId: String, photoId: String, src: String, message: Option[String] = None, place: Option[String] = None, noStory: Boolean = false)
         var p = Photo(userId, userId + "-defaultalbum", userId + "-defaultphoto", src, Some("Default first image"), Option(Constants.places(Random.nextInt(Constants.places.length))), false)
@@ -553,6 +596,7 @@ object FacebookSimulator {
             x.foreach { res => log.debug(res.entity.asString) }
           }
         }
+      }
 
       case p: addPhotoToExistingAlbum => {
 
@@ -676,17 +720,6 @@ object FacebookSimulator {
       pipeline(Put(Constants.serverURL + "/user/" + userId + "/albums/photo", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId", "albumId" : "$albumId", "place": "$place","photoId": "$photoId", "src": "$src", "message": "$message", "noStory": $noStory}""")))
     }
 
-    def readImageA(): Array[Byte] = {
-      var name = Constants.images(Random.nextInt(Constants.images.length))
-      var byteArray = Files.readAllBytes(Paths.get(name))
-      if (byteArray.length > 0) {
-        Base64.encodeBase64(byteArray)
-      } else {
-        log.error("No image found at : " + name)
-        null
-      }
-    }
-
     //Image content will be encrypted and server does not know how to decrypt  
     def readImage(): String = {
       var name = Constants.images(Random.nextInt(Constants.images.length))
@@ -699,7 +732,5 @@ object FacebookSimulator {
       }
     }
   }
-
-
 
 }
