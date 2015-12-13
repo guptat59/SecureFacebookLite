@@ -3,6 +3,8 @@ import java.util.concurrent.ConcurrentHashMap
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
+import org.apache.commons.lang3.StringEscapeUtils
+
 object Security {
 
   var publicKeys = new ConcurrentHashMap[String, PublicKey]()
@@ -13,21 +15,22 @@ object Security {
 
 
   def main(args: Array[String]) {
-/*
-    var k = generateKey("user1")
-    var originalText = "The Far Eastern Party uisahfsdhfasdhg"
-    System.out.println("Original: " + originalText)
-    var cipherText = encryptAES(originalText, k.getPublic)
-    System.out.println("Encrypted AES Key String: " + cipherText(0).toString())
-    System.out.println("Encrypted Text Data String: " + cipherText(1).toString())
-    var plainText = decryptAES(cipherText, k.getPrivate)
-    System.out.println("Decrypted: " + plainText)
-  */}
+    /*
+        var k = generateKey("user1")
+        var originalText = "The Far Eastern Party uisahfsdhfasdhg"
+        System.out.println("Original: " + originalText)
+        var cipherText = encryptAES(originalText, k.getPublic)
+        System.out.println("Encrypted AES Key String: " + cipherText(0).toString())
+        System.out.println("Encrypted Text Data String: " + cipherText(1).toString())
+        var plainText = decryptAES(cipherText, k.getPrivate)
+        System.out.println("Decrypted: " + plainText)
+      */
+  }
 
 
-  def getPublicKey(user: String): PublicKey = {
+  def getPublicKey(user: String): Key = {
     var x = publicKeys.get(user)
-    println("Requested publickey : " + user + " Found : " + x)
+    //println("Requested publickey : " + user + " Found : " + x)
     x
   }
 
@@ -63,15 +66,26 @@ object Security {
     aesResponse(new String(secretKey, Constants.charset), ciphedKeyString, ciphedDataString)
   }
 
-  def decryptAES(ar: aesResponse, key: Key): String = {
+  def encryptProfileAES(text: String, key: Key, secretKeyString: String): String = {
+    var secretKey = secretKeyString.getBytes(Constants.charset)
+    var aeskey = new SecretKeySpec(secretKey, "AES")
+    var aes = Cipher.getInstance("AES")
+    aes.init(Cipher.ENCRYPT_MODE, aeskey)
+    var ciphedKeyString = encryptRSA(new String(secretKey, Constants.charset), key)
+    var ciphedData = aes.doFinal(text.getBytes())
+    var ciphedDataString = new String(ciphedData, Constants.charset)
+    StringEscapeUtils.escapeJson(ciphedDataString)
+  }
 
-    var secretkey = decryptRSA(ar.ciphedSecretKey, key)
+  def decryptAES(ciphedSecretKey: String, ciphedData: String, key: Key): String = {
+
+    var secretkey = decryptRSA(ciphedSecretKey, key)
 
     var aes = Cipher.getInstance("AES")
     var aeskey = new SecretKeySpec(secretkey.getBytes(Constants.charset), "AES")
     aes.init(Cipher.DECRYPT_MODE, aeskey)
 
-    var normaltext = aes.doFinal(ar.ciphedData.getBytes(Constants.charset))
+    var normaltext = aes.doFinal(ciphedData.getBytes(Constants.charset))
     new String(normaltext)
   }
 

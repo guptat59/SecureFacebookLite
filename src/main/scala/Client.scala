@@ -1,17 +1,18 @@
 import java.nio.file.{Files, Paths}
-import java.security.{KeyPairGenerator, PrivateKey, PublicKey}
+import java.security.{SecureRandom, KeyPairGenerator, PrivateKey, PublicKey}
 import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.{TimeUnit, ConcurrentHashMap}
 import java.util.concurrent.atomic.AtomicInteger
 import javax.crypto.Cipher
 
-import Constants.Privacy
+import Constants.{PostTypes, Privacy}
 import akka.actor.ActorSelection.toScala
 import akka.actor.{Actor, ActorLogging, ActorSystem, Cancellable, Props, actorRef2Scala}
 import akka.pattern.ask
 import akka.util.Timeout
 import com.typesafe.config.ConfigFactory
 import org.apache.commons.codec.binary.Base64
+import org.apache.commons.lang3.StringEscapeUtils
 import spray.client.pipelining.sendReceive
 import spray.http.ContentType.apply
 import spray.http.{HttpResponse, _}
@@ -30,8 +31,8 @@ object FacebookSimulator {
     """
   akka {
     #log-config-on-start = on
-    stdout-loglevel = "DEBUG"
-    loglevel = "DEBUG"    
+    stdout-loglevel = "INFO"
+    loglevel = "INFO"
   }
     """
   val system = ActorSystem("FBClients", ConfigFactory.parseString(actorConf))
@@ -60,70 +61,72 @@ object FacebookSimulator {
   keyGen.initialize(1024)
 
   def main(args: Array[String]) {
-    //bootSystem()
-    // checkSanity()
+    // bootSystem()
+    checkSanity()
     // startSchedulers()
 
-    test()
   }
 
-  def bootSystem(): Unit = {
-    createUsers()
+  sealed trait seal
 
-    while (createdUsers.get() < Constants.totalUsers) {
-      Thread.sleep(1000)
-      println("Waiting till all the users have booted up!! : " + createdUsers.get())
-    }
+  case class getPage()
 
-    Thread.sleep(1000)
-    makeFriends()
+  case class getProfile(userId: String)
 
-    while (frndsAdded.get() < Constants.totalUsers) {
-      Thread.sleep(1000)
-      println("Waiting till all the users have made some friends!! : " + frndsAdded.get())
-    }
+  case class updateProfile(u: User)
 
-    Thread.sleep(1000)
+  case class addDefaultAlbum()
 
-    createAlbums()
+  case class addDynamicAlbumAndPhoto()
 
-    while (albumsAdded.get() < Constants.totalUsers) {
-      Thread.sleep(1000)
-      println("Waiting till all the users have at least one album!! : " + albumsAdded.get())
-    }
+  case class addDefaultImages()
 
-    createPhotos()
+  case class addPhotoToExistingAlbum()
 
-    while (photosAdded.get() < Constants.totalUsers) {
-      Thread.sleep(1000)
-      println("Waiting till all the users have at least one album!! : " + albumsAdded.get())
-    }
-  }
+  case class addImage()
+
+  case class addAlbum()
+
+  case class updateAlbum(a: Album)
+
+  case class deleteAlbum(albumId: String)
+
+  case class getProfileSecretKey(requestorId: String, pubKey: PublicKey)
 
   def checkSanity(): Unit = {
     var firstTime = true
 
     var userName = userPrefix + 4
     var frndName = userPrefix + 7
-    val sleepdelay = 1000
+    createUser(userName)
+    createUser(frndName)
 
-    // Sanity Check
-    while (true) {
-      Thread.sleep(5000)
-      println("##########################################################################################################")
-      var user = system.actorSelection(namingPrefix + userName)
-      var frnd = system.actorSelection(namingPrefix + frndName)
+    val sleepdelay = 5000
+    Thread.sleep(sleepdelay)
+    var user = system.actorSelection(namingPrefix + userName)
+    var frnd = system.actorSelection(namingPrefix + frndName)
 
-      if (firstTime) {
-        user ? FriendRequest(userName, frndName)
-        firstTime = false
-      }
 
-      println("UserPost >> ")
+    println("Frnd Request >> ")
+    user ? FriendRequest(userName, frndName)
+    Thread.sleep(sleepdelay)
+    println("Get profile >> ")
+    frnd ? getProfile(userName)
+    Thread.sleep(sleepdelay)
+    println("UserPost >> ")
+    user ? UserPost("", userName, "post1 by " + userName, Option("google1"), Option("Paris"), Privacy.Friends, Some("uuid"))
+    Thread.sleep(sleepdelay * 3)
+    user ? UserPost("", userName, "post2 by " + userName, Option("google2"), Option("Paris2"), Privacy.Friends, Some("uuid"))
+    Thread.sleep(sleepdelay * 3)
 
-      //user ? UserPost(userName, "post by " + userName, Option("google1"), Option("Paris"), Privacy.Friends, Some("uuid")) Thread.sleep(sleepdelay)
-      //frnd ? UserPost(frndName, "post by " + frndName, Option("google2"), Option("London"), Privacy.Friends, Some("uuid")) Thread.sleep(sleepdelay)
+    //frnd ? UserPost(frndName, "post by " + frndName, Option("google2"), Option("London"), Privacy.Friends, Some("uuid")) Thread.sleep(sleepdelay)
+    //user ? getPage()
+   // Thread.sleep(sleepdelay)
 
+    frnd ? getPage()
+    Thread.sleep(sleepdelay)
+
+    if (false) {
       println("get profile >> ")
 
       user ? getProfile(frndName)
@@ -147,12 +150,6 @@ object FacebookSimulator {
       Thread.sleep(sleepdelay)
 
       println("get page >> ")
-
-      user ? getPage()
-      Thread.sleep(sleepdelay)
-      frnd ? getPage()
-      Thread.sleep(sleepdelay)
-
       println("get friends list>> ")
 
       user ? getFriendsList(userName, frndName)
@@ -194,22 +191,8 @@ object FacebookSimulator {
       Thread.sleep(sleepdelay)
       frnd ? getUserAlbums(frndName, userName)
       Thread.sleep(sleepdelay)
-
       Thread.sleep(10000)
     }
-  }
-
-  def test(): Unit = {
-    var userId = userPrefix + 0
-    var key = Security.generateKey(userId)
-    var publicKey = key.getPublic()
-    var privateKey = key.getPrivate()
-    var user = system.actorOf(Props(new UserClient(userId, publicKey, privateKey)), userId)
-    var u = new User(userId, "First-" + userId, "Last-" + userId, Random.nextInt(100) + 1, Gender.apply(Random.nextInt(Gender.maxId)).toString(), Relation.Single.toString())
-    user ! u
-    user ! UserPost(userId, "post by " + userId, Option("google1"), Option("Paris"), Privacy.Friends, Some("uuid"))
-
-
   }
 
 
@@ -318,16 +301,54 @@ object FacebookSimulator {
   var albumsAdded = new AtomicInteger(0)
   var photosAdded = new AtomicInteger(0)
 
+  def bootSystem(): Unit = {
+    createUsers()
+
+    while (createdUsers.get() < Constants.totalUsers) {
+      Thread.sleep(1000)
+      println("Waiting till all the users have booted up!! : " + createdUsers.get())
+    }
+
+    Thread.sleep(1000)
+    makeFriends()
+
+    while (frndsAdded.get() < Constants.totalUsers) {
+      Thread.sleep(1000)
+      println("Waiting till all the users have made some friends!! : " + frndsAdded.get())
+    }
+
+    Thread.sleep(1000)
+
+    createAlbums()
+
+    while (albumsAdded.get() < Constants.totalUsers) {
+      Thread.sleep(1000)
+      println("Waiting till all the users have at least one album!! : " + albumsAdded.get())
+    }
+
+    createPhotos()
+
+    while (photosAdded.get() < Constants.totalUsers) {
+      Thread.sleep(1000)
+      println("Waiting till all the users have at least one album!! : " + albumsAdded.get())
+    }
+  }
+
+  def createUser(userId: String): Unit = {
+
+    var key = Security.generateKey(userId)
+    var publicKey = key.getPublic()
+    var privateKey = key.getPrivate()
+    var user = system.actorOf(Props(new UserClient(userId, publicKey, privateKey)), userId)
+    var u = new User(userId, "First-" + userId, "Last-" + userId, Random.nextInt(100) + 1, Gender.apply(Random.nextInt(Gender.maxId)).toString(), Relation.Single.toString())
+    user ? u
+  }
+
   def createUsers(): Unit = {
 
     for (i <- 0 until Constants.totalUsers) {
       var userId = userPrefix + i
-      var key = keyGen.generateKeyPair()
-      var publicKey = key.getPublic()
-      var privateKey = key.getPrivate()
-      var user = system.actorOf(Props(new UserClient(userId, publicKey, privateKey)), userId)
-      var u = new User(userId, "First-" + userId, "Last-" + userId, Random.nextInt(100) + 1, Gender.apply(Random.nextInt(Gender.maxId)).toString(), Relation.Single.toString())
-      user ! u
+      createUser(userId)
     }
   }
 
@@ -371,56 +392,32 @@ object FacebookSimulator {
     }
   }
 
-  sealed trait seal
-
-  case class getPage()
-
-  case class getProfile(userId: String)
-
-  case class updateProfile(u: User)
-
-  case class addDefaultAlbum()
-
-  case class addDynamicAlbumAndPhoto()
-
-  case class addDefaultImages()
-
-  case class addPhotoToExistingAlbum()
-
-  case class addImage()
-
-  case class addAlbum()
-
-  case class updateAlbum(a: Album)
-
-  case class deleteAlbum(albumId: String)
-
 
   class UserClient(userId: String, publicKey: PublicKey, privateKey: PrivateKey) extends Actor with SprayJsonSupport with AdditionalFormats with ActorLogging {
     implicit val system = context.system
 
     import system.dispatcher
 
-    implicit val timeout = Timeout(1000000)
+    implicit val timeout = Timeout(100, TimeUnit.SECONDS)
 
     var pipeline = (sendReceive)
 
     def authenticate(): Boolean = {
-      log.info("Userid : " + userId + " key " + Security.getPublicKey(userId))
+      log.debug("Userid : " + userId + " key " + Security.getPublicKey(userId))
       var publicKeyStr = Base64.encodeBase64String(publicKey.getEncoded())
       var response: HttpResponse = Await.result(pipeline(Post(Constants.serverURL + "/auth/request", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId", "key" : "$publicKeyStr"}"""))), timeout.duration)
       var encryptedContent = response.entity.asString
-      log.info("To be decrypted : " + encryptedContent)
+      log.debug("To be decrypted : " + encryptedContent)
       var token = decryptUsingPrivate(encryptedContent)
 
       response = Await.result(pipeline(Post(Constants.serverURL + "/auth/verify", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId", "token" : "$token"}"""))), timeout.duration)
       if (response.entity.asString.toBoolean) {
         var httpCookie = response.headers.collect { case spray.http.HttpHeaders.`Set-Cookie`(hc) => hc }
-        pipeline = addHeader(spray.http.HttpHeaders.Cookie(httpCookie)) ~> sendReceive
-        println("Added cookie -> " + httpCookie + " to pipeline header!")
+        pipeline = addHeader(spray.http.HttpHeaders.Cookie(httpCookie)) ~> (sendReceive)
+        log.info("Added cookie -> " + httpCookie + " to pipeline header!")
         true
       } else {
-        println("Failed to authenticate :( " + userId)
+        log.error("Failed to authenticate :( " + userId)
         false
       }
     }
@@ -433,52 +430,92 @@ object FacebookSimulator {
     var photoKeys = new ConcurrentHashMap[String, String]()
     // user friends
     var userFriends = new ConcurrentHashMap[String, String]()
+    // profile secret key for the user profile.
+    var profileSecretKey = "";
 
+
+    def notifyToFrnds(PostType: String, uuid: String, secretKey: String) = {
+
+      var it = userFriends.keySet().iterator()
+      while (it.hasNext) {
+        var frndId = it.next()
+        var frndPublicKey = Security.getPublicKey(frndId)
+        var encryptedKey = Security.encryptRSA(secretKey, frndPublicKey)
+        var frnd = system.actorSelection((namingPrefix + frndId))
+        log.debug(userId + " Notifying friend : " + frndId + " of post " + PostType + " with uuid " + uuid)
+        frnd ! Notify(PostType, uuid, encryptedKey)
+      }
+
+    }
+
+    import jsonProtocol._
+    import spray.json._
+    import DefaultJsonProtocol._
 
     def receive = {
 
-      case u: User => {
-        authenticate()
 
-        Security.generateKey(u.userId)
-        var userId = u.userId
-        var firstName = u.firstName
-        var lastName = u.lastName
-        var age = u.age
-        var gender = u.gender
-        var relation = u.relation
-        log.debug("Creating user with id " + userId)
-        val result: Future[HttpResponse] = pipeline(Put(Constants.serverURL + "/user", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId", "firstName" : "$firstName" , "lastName" : "$lastName", "age" : $age , "gender" :  "$gender", "relation" :  "$relation"}""")))
-        Await.result(result, timeout.duration)
-        result.onComplete {
-          x => {
-            createdUsers.incrementAndGet()
-            x.foreach { res => log.debug(res.entity.asString) }
+      case u: User => {
+        var auth = authenticate()
+
+        if (auth) {
+          log.info("Creating user with id " + userId)
+          var random = new SecureRandom()
+          var secretKey: Array[Byte] = Array.fill[Byte](16)(0)
+          random.nextBytes(secretKey)
+          profileSecretKey = new String(secretKey, Constants.charset)
+
+          var firstName = Security.encryptProfileAES(u.firstName, publicKey, profileSecretKey)
+          var lastName = u.lastName
+          var age = u.age
+          var gender = Security.encryptProfileAES(u.gender, publicKey, profileSecretKey)
+          var relation = Security.encryptProfileAES(u.relation, publicKey, profileSecretKey)
+
+          val result: Future[HttpResponse] = pipeline(Put(Constants.serverURL + "/user", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId", "firstName" : "$firstName" , "lastName" : "$lastName", "age" : $age , "gender" :  "$gender", "relation" :  "$relation"}""")))
+          Await.result(result, timeout.duration)
+          result.onComplete {
+            x => {
+              var c = createdUsers.incrementAndGet()
+              log.info("Current created users count : " + c)
+              x.foreach { res => log.info(res.entity.asString) }
+            }
           }
+
+        } else {
+          log.error(userId + " creation failed")
         }
+
       }
 
       case n: Notify => {
+        log.debug("Received " + n.notifyType + " key " + n.key)
         n.notifyType match {
           case Notification.ProfileType =>
             profileKeys.put(n.key, n.value)
           case Notification.PostType =>
+            log.debug("Added " + n.notifyType + " key " + n.key)
             postKeys.put(n.key, n.value)
           case Notification.PhotoType =>
             photoKeys.put(n.key, n.value)
           case Notification.FriendAddType =>
-            frndsAdded.put(n.key, n.value)
+            userFriends.put(n.key, n.value)
         }
+      }
+
+      case sp: getProfileSecretKey => {
+        log.debug("getProfileSecretKey req received from : " + sp.requestorId)
+        var secretkey = Security.encryptRSA(profileSecretKey, sp.pubKey)
+        sender ! secretkey
       }
 
       case uu: updateProfile => {
         var user = uu.u
         var userId = user.userId
-        var firstName = user.firstName
+        var firstName = Security.encryptProfileAES(user.firstName, publicKey, profileSecretKey)
         var lastName = user.lastName
         var age = user.age
-        var gender = user.gender
-        var relation = user.relation
+        var gender = Security.encryptProfileAES(user.gender, publicKey, profileSecretKey)
+        var relation = Security.encryptProfileAES(user.relation, publicKey, profileSecretKey)
         log.debug("Updating user with id " + userId)
         val result: Future[HttpResponse] = pipeline(Post(Constants.serverURL + "/user", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId", "firstName" : "$firstName" , "lastName" : "$lastName", "age" : $age , "gender" :  "$gender", "relation" :  "$relation"}""")))
         Await.result(result, timeout.duration)
@@ -493,6 +530,14 @@ object FacebookSimulator {
         var userId = rf.userId
         var frndIds = rf.frndId
         log.debug("Requesting user,frnd : " + userId + " , " + frndIds)
+        var frndIdsList = frndIds.split(" , ")
+        var it = frndIdsList.iterator
+        while (it.hasNext) {
+          var frndId = it.next().trim()
+          userFriends.put(frndId, frndId)
+          var friend = system.actorSelection(namingPrefix + frndId)
+          friend ! Notify(Notification.FriendAddType, userId, userId)
+        }
         val result: Future[HttpResponse] = pipeline(Post(Constants.serverURL + "/user/" + userId + "/addfriend", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId" , "frndId" : "$frndIds" }""")))
         Await.result(result, timeout.duration)
         result.onComplete {
@@ -504,43 +549,76 @@ object FacebookSimulator {
       }
 
       case ap: UserPost => {
+
         var ar = Security.encryptAES(ap.message, publicKey)
-        var message = ar.ciphedData
+
+        var message = StringEscapeUtils.escapeJson(ar.ciphedData)
         var link = ap.link
         var object_attachment = ap.object_attachment
         var place = ap.place
         var privacy = ap.privacy
         var postBy = ap.postby
+        val postType = PostTypes.Default
+        val result: HttpResponse = Await.result(pipeline(Put(Constants.serverURL + "/user/" + userId + "/feed", HttpEntity(MediaTypes.`application/json`, s"""{"uuid" : "" , "postby": "$postBy", "message": "$message", "link": "$link", "place": "$place", "privacy": "$privacy", "object_attachment": "$object_attachment" , "Type" : "$postType" }"""))), timeout.duration)
 
-        val result: HttpResponse = Await.result(pipeline(Put(Constants.serverURL + "/user/" + userId + "/feed", HttpEntity(MediaTypes.`application/json`, s"""{"postby": "$postBy", "message": "$message", "link": "$link", "place": "$place", "privacy": "$privacy", "object_attachment": "$object_attachment"}"""))), timeout.duration)
-
-        import jsonProtocol._
-        import spray.json._
-        import DefaultJsonProtocol._
-
+        log.debug("parsed json > " + result.entity.asString)
         var s = result.entity.asString.parseJson.convertTo[PostAdded]
 
-        notify(Notification.PostType, s.uuid, Security.encryptRSA(ar.secretKey, ""))
+        notifyToFrnds(Notification.PostType, s.uuid, ar.secretKey)
 
         log.debug(result.entity.asString)
       }
 
       case gp: getProfile => {
-        val result: Future[HttpResponse] = pipeline(Get(Constants.serverURL + "/user" + "?userId=" + gp.userId))
-        Await.result(result, timeout.duration)
-        result.onComplete {
-          x => {
-            x.foreach { res => log.debug(res.entity.asString) }
-          }
+        log.info("profile query for " + gp.userId)
+        val result: HttpResponse = Await.result(pipeline(Get(Constants.serverURL + "/user" + "?userId=" + gp.userId)), timeout.duration);
+        var s = result.entity.asString.parseJson.convertTo[User]
+        log.info("Profile received : " + s)
+        var ciphedSecretkey = profileKeys.get(gp.userId)
+
+        if (ciphedSecretkey == null) {
+          var user = system.actorSelection(namingPrefix + gp.userId)
+          ciphedSecretkey = Await.result(user ? getProfileSecretKey(userId, publicKey), timeout.duration).asInstanceOf[String]
+          log.debug("getProfileSecretKey req received from : " + gp.userId + " " + ciphedSecretkey)
+          profileKeys.put(gp.userId, ciphedSecretkey)
         }
+        s.firstName = Security.decryptAES(ciphedSecretkey, s.firstName, privateKey)
+        s.gender = Security.decryptAES(ciphedSecretkey, s.gender, privateKey)
+        s.relation = Security.decryptAES(ciphedSecretkey, s.relation, privateKey)
+        log.info("Profile Decrypted : " + s)
       }
 
       case gup: getPage => {
-        val result: Future[HttpResponse] = pipeline(Get(Constants.serverURL + "/user/" + userId + "/home"))
-        Await.result(result, timeout.duration)
-        result.onComplete {
-          x => {
-            x.foreach { res => log.debug(res.entity.asString) }
+        val result: HttpResponse = Await.result(pipeline(Get(Constants.serverURL + "/user/" + userId + "/home")), timeout.duration)
+        log.debug(result.entity.asString)
+        import spray.json._
+        log.debug("keys size post, photos, friends : " + postKeys.size() + "  " + photoKeys.size() + "  " + userFriends.size())
+        log.debug("userpage : " + result.entity.asString)
+        var userpage = result.entity.asString.parseJson.convertTo[UserPage]
+        for (post <- userpage.posts) {
+          if (post.Type.equals(Constants.PostTypes.Default)) {
+            if (postKeys.containsKey(post.uuid)) {
+              log.info("Encrypted Post : " + post)
+              post.message = Security.decryptAES(postKeys.get(post.uuid), StringEscapeUtils.unescapeJson(post.message), privateKey)
+              log.info("Decrypted Post : " + post)
+            } else {
+              log.info("No key to decrypt post Id : " + post.uuid + "size " + postKeys.size())
+            }
+          } else if (post.Type.equals(Constants.PostTypes.Photo)) {
+            // Right now all will be displayed as is!!
+            // In Phase 2, content will be encrypted. So decrypt and display the data/image here.
+
+            if (photoKeys.containsKey(post.uuid)) {
+              post.message = Security.decryptAES(postKeys.get(post.uuid), StringEscapeUtils.unescapeJson(post.message), privateKey)
+              log.info("Decrypted Post : userId : " + userId + " Post : \n " + post)
+            } else {
+              log.info("No key to decrypt post Id : " + post.uuid + "size " + postKeys.size())
+            }
+          } else if (post.Type.equals(Constants.PostTypes.ProfileUpdate)) {
+            log.error("Look in to this 2")
+
+          } else {
+            log.error("Look in to this 3")
           }
         }
       }
@@ -712,7 +790,8 @@ object FacebookSimulator {
       var userId = p.userId
       var albumId = p.albumId
       var photoId = p.photoId
-      var src = p.src
+      var aesRes = Security.encryptAES(p.src, publicKey)
+      var src = StringEscapeUtils.escapeJson(aesRes.ciphedData)
       var noStory = p.noStory
       var message = if (p.message.isDefined) p.message.get else ""
       var place = if (p.place.isDefined) p.place.get else ""
@@ -720,7 +799,7 @@ object FacebookSimulator {
       pipeline(Put(Constants.serverURL + "/user/" + userId + "/albums/photo", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId", "albumId" : "$albumId", "place": "$place","photoId": "$photoId", "src": "$src", "message": "$message", "noStory": $noStory}""")))
     }
 
-    //Image content will be encrypted and server does not know how to decrypt  
+    //Image content will be encrypted and server does not know how to decrypt
     def readImage(): String = {
       var name = Constants.images(Random.nextInt(Constants.images.length))
       var byteArray = Files.readAllBytes(Paths.get(name))

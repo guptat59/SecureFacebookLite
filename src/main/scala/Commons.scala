@@ -86,13 +86,13 @@ object UserLoginJsonSupport extends DefaultJsonProtocol with SprayJsonSupport {
 //JSON Types
 //found : Any required: spray.httpx.marshalling.ToResponseMarshallable
 
-case class User(userId: String, firstName: String, lastName: String, age: Int, gender: String, relation: String)
+case class User(val userId: String, var firstName: String, var lastName: String,var age: Int,var gender: String,var relation: String)
 
 case class FriendRequest(userId: String, frndId: String)
 
 case class UsersList(userIds: Array[String])
 
-case class UserPost(postby: String, message: String, link: Option[String] = None, place: Option[String] = None, privacy: String, object_attachment: Option[String] = None, Type: Option[String] = Option(Constants.PostTypes.Default))
+case class UserPost(var uuid: String, postby: String,var  message: String, link: Option[String] = None, place: Option[String] = None, privacy: String, object_attachment: Option[String] = None, Type: String = Constants.PostTypes.Default)
 
 case class PostAdded(uuid: String, message: String)
 
@@ -120,7 +120,7 @@ object jsonProtocol extends DefaultJsonProtocol with SprayJsonSupport with NullO
   }
 
   implicit val UserFormat = jsonFormat6(User)
-  implicit val postFormat = jsonFormat7(UserPost)
+  implicit val postFormat = jsonFormat8(UserPost)
   implicit val postAddedFormat = jsonFormat2(PostAdded)
 
   implicit object postList extends RootJsonFormat[UserPage] {
@@ -141,8 +141,6 @@ object jsonProtocol extends DefaultJsonProtocol with SprayJsonSupport with NullO
 }
 
 case class findProfile(userId: String)
-
-case class addPost(postId: String, userId: String, post: UserPost)
 
 //extends Seal
 case class getUserPage(userId: String)

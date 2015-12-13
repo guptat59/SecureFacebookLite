@@ -55,11 +55,6 @@ object FacebookServer extends App with SimpleRoutingApp {
     routes
   }
 
-  def buildaddPost(userId: String, post: UserPost): addPost = {
-    var p = new addPost(UUID.randomUUID().toString(), userId, post)
-    p
-  }
-
   def jsonRes(route: Route) = {
     cookie("userIdToken") { cookieUserId =>
       respondWithMediaType(MediaTypes.`application/json`) {
@@ -120,7 +115,7 @@ object FacebookServer extends App with SimpleRoutingApp {
             if (toBeVerifiedTokens.get(auth.userId).equals(auth.token)) {
               toBeVerifiedTokens.remove(auth.userId)
               setCookie(HttpCookie("userIdToken", auth.userId)) {
-                println("User verified on server")
+                println("User verified on server : " + auth.userId)
                 complete("true")
               }
             } else {
@@ -138,6 +133,7 @@ object FacebookServer extends App with SimpleRoutingApp {
         put {
           entity(as[User]) { newUsr =>
             complete {
+              println("Request received at server [createProfille] " +newUsr )
               if (!userbase.contains(newUsr.userId)) {
                 val f = Await.result(FBServers ? newUsr, timeout.duration)
                 if (f.isInstanceOf[Success]) {
@@ -198,7 +194,8 @@ object FacebookServer extends App with SimpleRoutingApp {
           //Verify the user. TODO        
           entity(as[UserPost]) { postjson =>
             complete {
-              val f = Await.result(FBServers ? buildaddPost(userId, postjson), timeout.duration)
+              postjson.uuid = UUID.randomUUID().toString()
+              val f = Await.result(FBServers ? postjson, timeout.duration)
               if (f.isInstanceOf[PostAdded]) {
                 f.asInstanceOf[PostAdded]
               } else if (f.isInstanceOf[Error]) {
@@ -370,7 +367,7 @@ object FacebookServer extends App with SimpleRoutingApp {
         if (!userbase.contains(userId)) {
           var user = createUserWithID(u)
           userbase.put(userId, user)
-          log.debug("created user : " + userId)
+          log.info("created user : " + userId)
           sender ! Success(Constants.messages.created + userId)
         } else {
           var user = userbase.get(userId)
@@ -382,6 +379,7 @@ object FacebookServer extends App with SimpleRoutingApp {
       case fr: FriendRequest => {
         var userId = fr.userId
         var frndIds = fr.frndId.split(" , ")
+
         if (userbase.contains(userId)) {
           var newIds = Array[String]()
           var user = userbase.get(userId)
@@ -398,7 +396,7 @@ object FacebookServer extends App with SimpleRoutingApp {
           }
           sender ! UsersList(newIds)
         } else {
-          log.error("Either of user or friend id is unavialable: " + userId + frndIds)
+          log.error("Either of user or friend id is unavialable: " + userId + frndIds.mkString + "userbase" + userbase.size)
           sender ! Error(Constants.messages.noUser + userId + " or " + frndIds)
         }
       }
@@ -412,24 +410,24 @@ object FacebookServer extends App with SimpleRoutingApp {
         }
       }
 
-      case ap: addPost => {
-        var user = userbase.get(ap.userId)
+      case ap: UserPost => {
+        var user = userbase.get(ap.postby)
         if (user.isEmpty) {
           sender ! Error(Constants.messages.noUser)
         } else {
           //Can control this based on a private post or friends post.
-          if (ap.post.privacy.equals(Constants.Privacy.Private)) {
-            user.get.addToFeed(ap.postId, ap.post)
-          } else if (ap.post.privacy.equals(Constants.Privacy.Friends)) {
-            user.get.addToFeed(ap.postId, ap.post)
+          if (ap.privacy.equals(Constants.Privacy.Private)) {
+            user.get.addToFeed(ap.uuid, ap)
+          } else if (ap.privacy.equals(Constants.Privacy.Friends)) {
+            user.get.addToFeed(ap.uuid, ap)
             var it = user.get.getFriendList().iterator
             while (it.hasNext) {
               var friendId = it.next()
               var friend = userbase.get(friendId)
-              friend.get.addToFeed(ap.postId, ap.post)
+              friend.get.addToFeed(ap.uuid, ap)
             }
           }
-          sender ! PostAdded(ap.postId, Constants.messages.success)
+          sender ! PostAdded(ap.uuid, Constants.messages.success)
         }
       }
 
@@ -526,7 +524,7 @@ object FacebookServer extends App with SimpleRoutingApp {
         } else {
           var isSuccess = user.get.addPhotoToAlbum(ai.userId, ai.albumId, ai)
           if (isSuccess) {
-            var p = UserPost(ai.userId, ai.src, ai.message, ai.place, Constants.Privacy.Friends, Some(ai.photoId), Option(Constants.PostTypes.Photo))
+            var p = UserPost(ai.photoId, ai.userId, ai.src, ai.message, ai.place, Constants.Privacy.Friends, Some(ai.photoId), Constants.PostTypes.Photo)
             user.get.addToFeed(ai.photoId, p)
             if (!ai.noStory) {
               // If this is a personal post. Just add to the feed of the user. 
