@@ -1,9 +1,13 @@
+import java.nio.file.{Paths, Files}
 import java.security._
 import java.util.concurrent.ConcurrentHashMap
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
+import org.apache.commons.codec.binary.Base64
 import org.apache.commons.lang3.StringEscapeUtils
+
+import scala.util.Random
 
 object Security {
 
@@ -15,16 +19,29 @@ object Security {
 
 
   def main(args: Array[String]) {
-    /*
-        var k = generateKey("user1")
-        var originalText = "The Far Eastern Party uisahfsdhfasdhg"
-        System.out.println("Original: " + originalText)
-        var cipherText = encryptAES(originalText, k.getPublic)
-        System.out.println("Encrypted AES Key String: " + cipherText(0).toString())
-        System.out.println("Encrypted Text Data String: " + cipherText(1).toString())
-        var plainText = decryptAES(cipherText, k.getPrivate)
-        System.out.println("Decrypted: " + plainText)
-      */
+
+    var k = generateKey("user1")
+    var originalText = "The Far Eastern Party uisahfsdhfasdhg"
+    originalText = readImage();
+    System.out.println("Original: " + originalText)
+    var aesres = encryptAES(originalText, k.getPublic)
+    System.out.println("Encrypted AES Key String: " + aesres.ciphedSecretKey)
+    System.out.println("Encrypted Text Data String: " + aesres.ciphedData)
+    var x =  StringEscapeUtils.escapeJson(aesres.ciphedData)
+    var plainText = decryptAES(aesres.ciphedSecretKey, aesres.ciphedData, k.getPrivate)
+    System.out.println("Decrypted: " + plainText)
+
+  }
+
+  def readImage(): String = {
+    var name = "C:\\Users\\Lavenger\\CodeSpace\\facebooklite\\src\\main\\resources\\Hello.jpg"
+    var byteArray = Files.readAllBytes(Paths.get(name))
+    if (byteArray.length > 0) {
+      var x = Base64.encodeBase64(byteArray)
+      new String(x, Constants.charset)
+    } else {
+      null
+    }
   }
 
 

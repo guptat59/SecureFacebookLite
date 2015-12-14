@@ -110,6 +110,9 @@ object FacebookSimulator {
     println("Frnd Request >> ")
     user ? FriendRequest(userName, frndName)
     Thread.sleep(sleepdelay)
+
+
+
     println("Get profile >> ")
     frnd ? getProfile(userName)
     Thread.sleep(sleepdelay)
@@ -153,6 +156,8 @@ object FacebookSimulator {
     frnd ? getFriendsList(frndName, userName)
     Thread.sleep(sleepdelay)
 
+    println("get album info>> ")
+
     println("addDefault album >> ")
     user ? addDefaultAlbum()
     Thread.sleep(sleepdelay)
@@ -164,45 +169,41 @@ object FacebookSimulator {
     println("Get new page")
     frnd ? getPage()
 
-    if (false) {
 
+    user ? getUserAlbums(userName, userName)
+    Thread.sleep(sleepdelay)
+    frnd ? getUserAlbums(frndName, frndName)
+    Thread.sleep(sleepdelay)
 
-      println("get album info>> ")
+    println("get frnd album info>> ")
 
-      user ? getUserAlbums(userName, userName)
-      Thread.sleep(sleepdelay)
-      frnd ? getUserAlbums(frndName, frndName)
-      Thread.sleep(sleepdelay)
+    user ? getUserAlbums(userName, frndName)
+    Thread.sleep(sleepdelay)
+    frnd ? getUserAlbums(frndName, userName)
+    Thread.sleep(sleepdelay)
 
-      println("get frnd album info>> ")
+    println("addDynamicAlbumAndPhoto>> ")
 
-      user ? getUserAlbums(userName, frndName)
-      Thread.sleep(sleepdelay)
-      frnd ? getUserAlbums(frndName, userName)
-      Thread.sleep(sleepdelay)
+    user ? addDynamicAlbumAndPhoto()
 
-      println("addDynamicAlbumAndPhoto>> ")
+    println("addPhotoToExistingAlbum>> ")
+    user ? addPhotoToExistingAlbum()
 
-      user ? addDynamicAlbumAndPhoto()
+    println("get frnd album info>> ")
 
-      println("addPhotoToExistingAlbum>> ")
-      user ? addPhotoToExistingAlbum()
+    var a = new Album(userName, userName + "-defaultalbum", None, Some(System.currentTimeMillis().toString()), Option("initial album"), Option("Hyderabad"), Some(System.currentTimeMillis().toString()), None)
+    user ? updateAlbum(a)
+    Thread.sleep(sleepdelay)
+    //frnd ? updateAlbum(a) Thread.sleep(sleepdelay)
 
-      println("get frnd album info>> ")
+    println("get frnd album info>> ")
 
-      var a = new Album(userName, userName + "-defaultalbum", None, Some(System.currentTimeMillis().toString()), Option("initial album"), Option("Hyderabad"), Some(System.currentTimeMillis().toString()), None)
-      user ? updateAlbum(a)
-      Thread.sleep(sleepdelay)
-      //frnd ? updateAlbum(a) Thread.sleep(sleepdelay)
-
-      println("get frnd album info>> ")
-
-      user ? getUserAlbums(userName, frndName)
-      Thread.sleep(sleepdelay)
-      frnd ? getUserAlbums(frndName, userName)
-      Thread.sleep(sleepdelay)
-      Thread.sleep(10000)
-    }
+    user ? getUserAlbums(userName, frndName)
+    Thread.sleep(sleepdelay)
+    frnd ? getUserAlbums(frndName, userName)
+    Thread.sleep(sleepdelay)
+    Thread.sleep(10000)
+    if (false) {}
   }
 
 
@@ -442,17 +443,17 @@ object FacebookSimulator {
     var userFriends = new ConcurrentHashMap[String, String]()
     // profile secret key for the user profile.
     var profileSecretKey = "";
-    
+
     def notifyToFrnds(PostType: String, uuid: String, secretKey: String) = {
       var it = userFriends.keySet().iterator()
-      log.info("Type : " + PostType + " uuid : " + uuid + " secretKey : " + secretKey)
+      log.debug("Type : " + PostType + " uuid : " + uuid + " secretKey : " + secretKey)
       updateKeysMap(Notify(PostType, uuid, Security.encryptRSA(secretKey, publicKey)))
       while (it.hasNext) {
         var frndId = it.next()
         var frndPublicKey = Security.getPublicKey(frndId)
         var encryptedKey = Security.encryptRSA(secretKey, frndPublicKey)
         var frnd = system.actorSelection((namingPrefix + frndId))
-        log.info("Notifying friend : " + frndId + " of post " + PostType + " with uuid " + uuid)
+        log.debug("Notifying friend : " + frndId + " of post " + PostType + " with uuid " + uuid)
         frnd ! Notify(PostType, uuid, encryptedKey)
       }
     }
@@ -580,7 +581,7 @@ object FacebookSimulator {
       }
 
       case gp: getProfile => {
-        log.info("profile query for " + gp.userId)
+        log.debug("profile query for " + gp.userId)
         val result: HttpResponse = Await.result(pipeline(Get(Constants.serverURL + "/user" + "?userId=" + gp.userId)), timeout.duration);
         var s = result.entity.asString.parseJson.convertTo[User]
         log.info("Profile received : " + s)
@@ -616,12 +617,12 @@ object FacebookSimulator {
               log.info("No key to decrypt post Id : " + post.uuid + "size " + postKeys.size())
             }
           } else if (post.Type.equals(Constants.PostTypes.Photo)) {
-            if (postKeys.containsKey(post.uuid)) {
-              log.info("Encrypted Post : " + post)
-              post.message = Security.decryptAES(postKeys.get(post.uuid), StringEscapeUtils.unescapeJson(post.message), privateKey)
-              log.info("Decrypted Post : " + post)
+            if (photoKeys.containsKey(post.uuid)) {
+              log.info("Encrypted Photo Post : " + post)
+              post.message = Security.decryptAES(photoKeys.get(post.uuid), post.message, privateKey)
+              log.info("Decrypted Photo Post : " + post)
             } else {
-              log.info("No key to decrypt post Id : " + post.uuid + "size " + postKeys.size())
+              log.info("No key to decrypt photo Id : " + post.uuid + "size " + postKeys.size())
             }
           } else {
             log.error("Should not happen")
@@ -781,7 +782,7 @@ object FacebookSimulator {
       var userId = p.userId
       var albumId = p.albumId
       var photoId = p.photoId
-      var aesRes = Security.encryptAES(p.src, publicKey)
+      var aesRes = Security.encryptAES(readImage(), publicKey)
       var src = StringEscapeUtils.escapeJson(aesRes.ciphedData)
       var noStory = p.noStory
       var message = if (p.message.isDefined) p.message.get else ""
@@ -797,7 +798,8 @@ object FacebookSimulator {
       var name = Constants.images(Random.nextInt(Constants.images.length))
       var byteArray = Files.readAllBytes(Paths.get(name))
       if (byteArray.length > 0) {
-        Base64.encodeBase64String(byteArray)
+        var x = Base64.encodeBase64(byteArray)
+        new String(x, Constants.charset)
       } else {
         log.error("No image found at : " + name)
         null
