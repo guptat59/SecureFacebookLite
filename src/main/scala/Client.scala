@@ -115,47 +115,57 @@ object FacebookSimulator {
     Thread.sleep(sleepdelay)
     println("UserPost >> ")
     user ? UserPost("", userName, "post1 by " + userName, Option("google1"), Option("Paris"), Privacy.Friends, Some("uuid"))
-    Thread.sleep(sleepdelay * 3)
-    user ? UserPost("", userName, "post2 by " + userName, Option("google2"), Option("Paris2"), Privacy.Friends, Some("uuid"))
-    Thread.sleep(sleepdelay * 3)
+    Thread.sleep(sleepdelay)
+    //user ? UserPost("", userName, "post2 by " + userName, Option("google2"), Option("Paris2"), Privacy.Friends, Some("uuid"))
+    //Thread.sleep(sleepdelay)
 
-    //frnd ? UserPost(frndName, "post by " + frndName, Option("google2"), Option("London"), Privacy.Friends, Some("uuid")) Thread.sleep(sleepdelay)
-    //user ? getPage()
-   // Thread.sleep(sleepdelay)
+    frnd ? UserPost("", frndName, "post by " + frndName, Option("google2"), Option("London"), Privacy.Friends, Some("uuid"))
+    Thread.sleep(sleepdelay)
+    user ? getPage()
+    Thread.sleep(sleepdelay)
 
     frnd ? getPage()
     Thread.sleep(sleepdelay)
+    println("get profile >> ")
+
+    user ? getProfile(frndName)
+    Thread.sleep(sleepdelay)
+    frnd ? getProfile(userName)
+    Thread.sleep(sleepdelay)
+
+    println("update profile >>")
+    var u = new User(userName, "First-" + userName + "u", "Last-" + userName + "u", Random.nextInt(100) + 1, Gender.apply(Random.nextInt(Gender.maxId)).toString(), Relation.Single.toString())
+    user ? updateProfile(u)
+    Thread.sleep(sleepdelay)
+    var f = new User(frndName, "First-" + frndName + "u", "Last-" + frndName + "u", Random.nextInt(100) + 1, Gender.apply(Random.nextInt(Gender.maxId)).toString(), Relation.Single.toString())
+    frnd ? updateProfile(f)
+    Thread.sleep(sleepdelay)
+
+    user ? getProfile(frndName)
+    Thread.sleep(sleepdelay)
+    frnd ? getProfile(userName)
+    Thread.sleep(sleepdelay)
+
+    println("get friends list>> ")
+
+    user ? getFriendsList(userName, frndName)
+    Thread.sleep(sleepdelay)
+    frnd ? getFriendsList(frndName, userName)
+    Thread.sleep(sleepdelay)
+
+    println("addDefault album >> ")
+    user ? addDefaultAlbum()
+    Thread.sleep(sleepdelay)
+
+    println("addDefault Photo >> ")
+    user ? addDefaultImages()
+    Thread.sleep(sleepdelay)
+
+    println("Get new page")
+    frnd ? getPage()
 
     if (false) {
-      println("get profile >> ")
 
-      user ? getProfile(frndName)
-      Thread.sleep(sleepdelay)
-      frnd ? getProfile(userName)
-      Thread.sleep(sleepdelay)
-
-      println("update profile >>")
-      var u = new User(userName, "First-" + userName + "u", "Last-" + userName + "u", Random.nextInt(100) + 1, Gender.apply(Random.nextInt(Gender.maxId)).toString(), Relation.Single.toString())
-      user ? updateProfile(u)
-      Thread.sleep(sleepdelay)
-      var f = new User(frndName, "First-" + frndName + "u", "Last-" + frndName + "u", Random.nextInt(100) + 1, Gender.apply(Random.nextInt(Gender.maxId)).toString(), Relation.Single.toString())
-      frnd ? updateProfile(f)
-      Thread.sleep(sleepdelay)
-
-      println("get profile >> ")
-
-      user ? getProfile(frndName)
-      Thread.sleep(sleepdelay)
-      frnd ? getProfile(userName)
-      Thread.sleep(sleepdelay)
-
-      println("get page >> ")
-      println("get friends list>> ")
-
-      user ? getFriendsList(userName, frndName)
-      Thread.sleep(sleepdelay)
-      frnd ? getFriendsList(frndName, userName)
-      Thread.sleep(sleepdelay)
 
       println("get album info>> ")
 
@@ -432,20 +442,33 @@ object FacebookSimulator {
     var userFriends = new ConcurrentHashMap[String, String]()
     // profile secret key for the user profile.
     var profileSecretKey = "";
-
-
+    
     def notifyToFrnds(PostType: String, uuid: String, secretKey: String) = {
-
       var it = userFriends.keySet().iterator()
+      log.info("Type : " + PostType + " uuid : " + uuid + " secretKey : " + secretKey)
+      updateKeysMap(Notify(PostType, uuid, Security.encryptRSA(secretKey, publicKey)))
       while (it.hasNext) {
         var frndId = it.next()
         var frndPublicKey = Security.getPublicKey(frndId)
         var encryptedKey = Security.encryptRSA(secretKey, frndPublicKey)
         var frnd = system.actorSelection((namingPrefix + frndId))
-        log.debug(userId + " Notifying friend : " + frndId + " of post " + PostType + " with uuid " + uuid)
+        log.info("Notifying friend : " + frndId + " of post " + PostType + " with uuid " + uuid)
         frnd ! Notify(PostType, uuid, encryptedKey)
       }
+    }
 
+    def updateKeysMap(n: Notify): Unit = {
+      n.notifyType match {
+        case Notification.ProfileType =>
+          profileKeys.put(n.key, n.value)
+        case Notification.PostType =>
+          log.debug("Added " + n.notifyType + " key " + n.key)
+          postKeys.put(n.key, n.value)
+        case Notification.PhotoType =>
+          photoKeys.put(n.key, n.value)
+        case Notification.FriendAddType =>
+          userFriends.put(n.key, n.value)
+      }
     }
 
     import jsonProtocol._
@@ -453,7 +476,6 @@ object FacebookSimulator {
     import DefaultJsonProtocol._
 
     def receive = {
-
 
       case u: User => {
         var auth = authenticate()
@@ -480,26 +502,14 @@ object FacebookSimulator {
               x.foreach { res => log.info(res.entity.asString) }
             }
           }
-
         } else {
           log.error(userId + " creation failed")
         }
-
       }
 
       case n: Notify => {
         log.debug("Received " + n.notifyType + " key " + n.key)
-        n.notifyType match {
-          case Notification.ProfileType =>
-            profileKeys.put(n.key, n.value)
-          case Notification.PostType =>
-            log.debug("Added " + n.notifyType + " key " + n.key)
-            postKeys.put(n.key, n.value)
-          case Notification.PhotoType =>
-            photoKeys.put(n.key, n.value)
-          case Notification.FriendAddType =>
-            userFriends.put(n.key, n.value)
-        }
+        updateKeysMap(n)
       }
 
       case sp: getProfileSecretKey => {
@@ -596,6 +606,7 @@ object FacebookSimulator {
         log.debug("userpage : " + result.entity.asString)
         var userpage = result.entity.asString.parseJson.convertTo[UserPage]
         for (post <- userpage.posts) {
+          // content will be encrypted. So decrypt and display the data/image here.
           if (post.Type.equals(Constants.PostTypes.Default)) {
             if (postKeys.containsKey(post.uuid)) {
               log.info("Encrypted Post : " + post)
@@ -605,20 +616,15 @@ object FacebookSimulator {
               log.info("No key to decrypt post Id : " + post.uuid + "size " + postKeys.size())
             }
           } else if (post.Type.equals(Constants.PostTypes.Photo)) {
-            // Right now all will be displayed as is!!
-            // In Phase 2, content will be encrypted. So decrypt and display the data/image here.
-
-            if (photoKeys.containsKey(post.uuid)) {
+            if (postKeys.containsKey(post.uuid)) {
+              log.info("Encrypted Post : " + post)
               post.message = Security.decryptAES(postKeys.get(post.uuid), StringEscapeUtils.unescapeJson(post.message), privateKey)
-              log.info("Decrypted Post : userId : " + userId + " Post : \n " + post)
+              log.info("Decrypted Post : " + post)
             } else {
               log.info("No key to decrypt post Id : " + post.uuid + "size " + postKeys.size())
             }
-          } else if (post.Type.equals(Constants.PostTypes.ProfileUpdate)) {
-            log.error("Look in to this 2")
-
           } else {
-            log.error("Look in to this 3")
+            log.error("Should not happen")
           }
         }
       }
@@ -654,11 +660,8 @@ object FacebookSimulator {
             x.foreach { res => log.debug(res.entity.asString) }
             var photoId = userId + UUID.randomUUID()
             var p = Photo(userId, albumId, photoId, readImage(), Some("Dynamic image" + photoId), Option(Constants.places(Random.nextInt(Constants.places.length))), false)
-            var r = addImage(p)
-            Await.result(r, timeout.duration)
-            r.onComplete { y =>
-              y.foreach { z => log.debug(z.entity.asString) }
-            }
+            var result = addImage(p)
+            log.debug(result.entity.asString)
           }
         }
       }
@@ -668,29 +671,17 @@ object FacebookSimulator {
         //userId: String, albumId: String, photoId: String, src: String, message: Option[String] = None, place: Option[String] = None, noStory: Boolean = false)
         var p = Photo(userId, userId + "-defaultalbum", userId + "-defaultphoto", src, Some("Default first image"), Option(Constants.places(Random.nextInt(Constants.places.length))), false)
         var result = addImage(p)
-        result.onComplete {
-          x => {
-            photosAdded.incrementAndGet()
-            x.foreach { res => log.debug(res.entity.asString) }
-          }
-        }
+        log.debug(result.entity.asString)
       }
 
       case p: addPhotoToExistingAlbum => {
-
         var albums = getUserAlbums(userId)
         //var albumId = albums(Random.nextInt(albums.length)).albumId
         var albumId = userId + "-defaultalbum"
         var photoId = userId + UUID.randomUUID()
         var p = Photo(userId, albumId, photoId, readImage(), Some("Dynamic image to existing album " + photoId), Option(Constants.places(Random.nextInt(Constants.places.length))), false)
         var result = addImage(p)
-        Await.result(result, timeout.duration)
-        result.onComplete { x =>
-          x.foreach {
-            response =>
-              log.debug(s"Photo added :\n${response.entity.asString}")
-          }
-        }
+        log.debug(s"Photo added :\n${result.entity.asString}")
       }
 
       case a: getUserAlbums => {
@@ -786,7 +777,7 @@ object FacebookSimulator {
       pipeline(Put(Constants.serverURL + "/user/" + userId + "/albums", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId", "albumId" :"$albumId", "coverPhoto" : "$coverPhoto", "createdTime" : "$createdTime", "description" : "$description", "place":"$place", "updateTime" :"$updateTime"}""")))
     }
 
-    def addImage(p: Photo): Future[HttpResponse] = {
+    def addImage(p: Photo): HttpResponse = {
       var userId = p.userId
       var albumId = p.albumId
       var photoId = p.photoId
@@ -796,7 +787,9 @@ object FacebookSimulator {
       var message = if (p.message.isDefined) p.message.get else ""
       var place = if (p.place.isDefined) p.place.get else ""
 
-      pipeline(Put(Constants.serverURL + "/user/" + userId + "/albums/photo", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId", "albumId" : "$albumId", "place": "$place","photoId": "$photoId", "src": "$src", "message": "$message", "noStory": $noStory}""")))
+      var result = Await.result(pipeline(Put(Constants.serverURL + "/user/" + userId + "/albums/photo", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId", "albumId" : "$albumId", "place": "$place","photoId": "$photoId", "src": "$src", "message": "$message", "noStory": $noStory}"""))), timeout.duration)
+      notifyToFrnds(Notification.PhotoType, p.photoId, aesRes.secretKey)
+      result
     }
 
     //Image content will be encrypted and server does not know how to decrypt

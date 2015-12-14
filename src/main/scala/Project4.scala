@@ -133,7 +133,6 @@ object FacebookServer extends App with SimpleRoutingApp {
         put {
           entity(as[User]) { newUsr =>
             complete {
-              println("Request received at server [createProfille] " +newUsr )
               if (!userbase.contains(newUsr.userId)) {
                 val f = Await.result(FBServers ? newUsr, timeout.duration)
                 if (f.isInstanceOf[Success]) {
