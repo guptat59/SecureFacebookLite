@@ -61,7 +61,7 @@ object FacebookSimulator {
   keyGen.initialize(1024)
 
   def main(args: Array[String]) {
-    // bootSystem()
+    bootSystem()
     checkSanity()
     // startSchedulers()
 
@@ -341,7 +341,7 @@ object FacebookSimulator {
 
     while (photosAdded.get() < Constants.totalUsers) {
       Thread.sleep(1000)
-      println("Waiting till all the users have at least one album!! : " + albumsAdded.get())
+      println("Waiting till all the users have some photos!! : " + photosAdded.get())
     }
   }
 
@@ -541,7 +541,7 @@ object FacebookSimulator {
         var userId = rf.userId
         var frndIds = rf.frndId
         log.debug("Requesting user,frnd : " + userId + " , " + frndIds)
-        var frndIdsList = frndIds.split(" , ")
+        var frndIdsList = frndIds.split(",")
         var it = frndIdsList.iterator
         while (it.hasNext) {
           var frndId = it.next().trim()
@@ -672,6 +672,7 @@ object FacebookSimulator {
         //userId: String, albumId: String, photoId: String, src: String, message: Option[String] = None, place: Option[String] = None, noStory: Boolean = false)
         var p = Photo(userId, userId + "-defaultalbum", userId + "-defaultphoto", src, Some("Default first image"), Option(Constants.places(Random.nextInt(Constants.places.length))), false)
         var result = addImage(p)
+        photosAdded.incrementAndGet()
         log.debug(result.entity.asString)
       }
 
