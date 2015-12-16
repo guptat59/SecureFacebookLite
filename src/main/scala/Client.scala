@@ -61,9 +61,15 @@ object FacebookSimulator {
   keyGen.initialize(1024)
 
   def main(args: Array[String]) {
-    bootSystem()
+    <<<<<<< HEAD
+      bootSystem()
     checkSanity()
     // startSchedulers()
+    =======
+    bootSystem()
+    //checkSanity()
+    startSchedulers()
+    >>>>>>> b91cb727589d6d093512e0c453561650543022e3
 
   }
 
@@ -94,12 +100,14 @@ object FacebookSimulator {
   case class getProfileSecretKey(requestorId: String, pubKey: PublicKey)
 
   def checkSanity(): Unit = {
+
+    System.out.println("starting sanity check")
     var firstTime = true
 
     var userName = userPrefix + 4
     var frndName = userPrefix + 7
-    createUser(userName)
-    createUser(frndName)
+    //  createUser(userName)
+    //createUser(frndName)
 
     val sleepdelay = 5000
     Thread.sleep(sleepdelay)
@@ -210,18 +218,18 @@ object FacebookSimulator {
   def startSchedulers(): Unit = {
 
     import system.dispatcher
-    var scpost: Cancellable = system.scheduler.schedule(FiniteDuration.apply(1, "seconds"), FiniteDuration.apply(scPostTime.toLong, "seconds"), (new Runnable {
+    var scpost: Cancellable = system.scheduler.schedule(FiniteDuration.apply(1, "seconds"), FiniteDuration.apply(scUpdateTime.toLong, "seconds"), (new Runnable {
       def run {
         var userName = userPrefix + (Random.nextInt(postUserPer))
         println(userName + " scpost")
         var user = system.actorSelection(namingPrefix + userName)
-        //user ! UserPost(userName, Security.encrypt("Post", userName), None, None, Privacy.Friends, None)
+        user ! UserPost("", userName, "post1 by " + userName, Option("google1"), Option("Paris"), Privacy.Friends, Some("uuid"))
       }
     }))
 
     var sccount = 1
 
-    var scalbum: Cancellable = system.scheduler.schedule(FiniteDuration.apply(1, "seconds"), FiniteDuration.apply(scAlbumTime.toLong, "seconds"), (new Runnable {
+    var scalbum: Cancellable = system.scheduler.schedule(FiniteDuration.apply(10, "seconds"), FiniteDuration.apply(scUpdateTime.toLong, "seconds"), (new Runnable {
       def run {
         sccount = sccount + 1
         var r = Random.nextInt(postPhotoPer)
@@ -232,7 +240,7 @@ object FacebookSimulator {
       }
     }))
 
-    var scphoto: Cancellable = system.scheduler.schedule(FiniteDuration.apply(1, "seconds"), FiniteDuration.apply(scPhotoTime.toLong, "seconds"), (new Runnable {
+    var scphoto: Cancellable = system.scheduler.schedule(FiniteDuration.apply(12, "seconds"), FiniteDuration.apply(scUpdateTime.toLong, "seconds"), (new Runnable {
       def run {
         sccount = sccount + 1
         var r = Random.nextInt(postPhotoPer)
@@ -243,21 +251,24 @@ object FacebookSimulator {
       }
     }))
 
-    var scview: Cancellable = system.scheduler.schedule(FiniteDuration.apply(1, "seconds"), FiniteDuration.apply(scView.toLong, "seconds"), (new Runnable {
+    var scview: Cancellable = system.scheduler.schedule(FiniteDuration.apply(3, "seconds"), FiniteDuration.apply(scUpdateTime.toLong, "seconds"), (new Runnable {
       def run {
         sccount = sccount + 1
         var r = Random.nextInt(totalUsers)
         var userName = userPrefix + r
         println(userName + " scview")
         var user = system.actorSelection(namingPrefix + userName)
-        if (r % 2 == 0)
-          user ! getProfile(userPrefix + Random.nextInt(Constants.totalUsers))
-        else
-          user ! getPage()
+        /*if (r % 2 == 0)
+        {*/
+        user ! getProfile(userPrefix + Random.nextInt(Constants.totalUsers))
+        user ! getPage()
+        //}
+        //else
+        //user ! getPage()
       }
     }))
 
-    var scfrndreq: Cancellable = system.scheduler.schedule(FiniteDuration.apply(5, "seconds"), FiniteDuration.apply(scFrndReq.toLong, "seconds"), (new Runnable {
+    var scfrndreq: Cancellable = system.scheduler.schedule(FiniteDuration.apply(100000, "seconds"), FiniteDuration.apply((2 * scUpdateTime).toLong, "seconds"), (new Runnable {
       def run {
         sccount = sccount + 1
         var r = Random.nextInt(Constants.totalUsers)
@@ -268,18 +279,21 @@ object FacebookSimulator {
       }
     }))
 
-    var scnewuser: Cancellable = system.scheduler.schedule(FiniteDuration.apply(5, "seconds"), FiniteDuration.apply(scNewUser.toLong, "seconds"), (new Runnable {
+    var scnewuser: Cancellable = system.scheduler.schedule(FiniteDuration.apply(20, "seconds"), FiniteDuration.apply((2 * scUpdateTime).toLong, "seconds"), (new Runnable {
       def run {
         val usercount = sccount + totalUsers
         var userName = userPrefix + usercount
-        // var user = system.actorOf(Props(new UserClient(userName)), userName)
-        // println(userName + " scnewuser")
-        // var u = new User(userName, "First-" + userName, "Last-" + userName, Random.nextInt(100) + 1, Gender.apply(Random.nextInt(Gender.maxId)).toString(), Relation.Single.toString());
-        //  user ! u
+        var key = Security.generateKey(userName)
+        var publicKey = key.getPublic()
+        var privateKey = key.getPrivate()
+        var user = system.actorOf(Props(new UserClient(userName, publicKey, privateKey)), userName)
+        println(userName + " scnewuser")
+        var u = new User(userName, "First-" + userName, "Last-" + userName, Random.nextInt(100) + 1, Gender.apply(Random.nextInt(Gender.maxId)).toString(), Relation.Single.toString());
+        user ! u
       }
     }))
 
-    var scupdate: Cancellable = system.scheduler.schedule(FiniteDuration.apply(1, "seconds"), FiniteDuration.apply(scUpdateTime.toLong, "seconds"), new Runnable {
+    var scupdate: Cancellable = system.scheduler.schedule(FiniteDuration.apply(20, "seconds"), FiniteDuration.apply((3 * scUpdateTime).toLong, "seconds"), new Runnable {
       def run {
         sccount = sccount + 1
         var r = Random.nextInt(postPhotoPer)
@@ -317,7 +331,7 @@ object FacebookSimulator {
 
     while (createdUsers.get() < Constants.totalUsers) {
       Thread.sleep(1000)
-      println("Waiting till all the users have booted up!! : " + createdUsers.get())
+      println("Waiting till all the users have booted up!! : " + Constants.totalUsers + " users: " + createdUsers.get())
     }
 
     Thread.sleep(1000)
@@ -325,7 +339,7 @@ object FacebookSimulator {
 
     while (frndsAdded.get() < Constants.totalUsers) {
       Thread.sleep(1000)
-      println("Waiting till all the users have made some friends!! : " + frndsAdded.get())
+      println("Waiting till all the users have made some friends!! : " + Constants.totalUsers + " frndsAdded: " + frndsAdded.get())
     }
 
     Thread.sleep(1000)
@@ -334,14 +348,18 @@ object FacebookSimulator {
 
     while (albumsAdded.get() < Constants.totalUsers) {
       Thread.sleep(1000)
-      println("Waiting till all the users have at least one album!! : " + albumsAdded.get())
+      println("Waiting till all the users have at least one album!! : " + Constants.totalUsers + " albums: " + albumsAdded.get())
     }
 
     createPhotos()
 
     while (photosAdded.get() < Constants.totalUsers) {
       Thread.sleep(1000)
-      println("Waiting till all the users have some photos!! : " + photosAdded.get())
+      <<<<<<< HEAD
+        println("Waiting till all the users have some photos!! : " + photosAdded.get())
+      =======
+      println("Waiting till all the users have at least one album!! : " + Constants.totalUsers + " photos: " + photosAdded.get())
+      >>>>>>> b91cb727589d6d093512e0c453561650543022e3
     }
   }
 
@@ -590,11 +608,11 @@ object FacebookSimulator {
         if (ciphedSecretkey == null) {
           var user = system.actorSelection(namingPrefix + gp.userId)
           ciphedSecretkey = Await.result(user ? getProfileSecretKey(userId, publicKey), timeout.duration).asInstanceOf[String]
-          log.debug("getProfileSecretKey req received from : " + gp.userId + " " + ciphedSecretkey)
+          log.info("getProfileSecretKey req received from : " + gp.userId + " " + ciphedSecretkey)
           profileKeys.put(gp.userId, ciphedSecretkey)
         }
         s.firstName = Security.decryptAES(ciphedSecretkey, s.firstName, privateKey)
-        s.gender = Security.decryptAES(ciphedSecretkey, s.gender, privateKey)
+        s.gender = Security.decryptAES(ciphedSecretkey, StringEscapeUtils.unescapeJson(s.gender), privateKey)
         s.relation = Security.decryptAES(ciphedSecretkey, s.relation, privateKey)
         log.info("Profile Decrypted : " + s)
       }
@@ -788,7 +806,6 @@ object FacebookSimulator {
       var noStory = p.noStory
       var message = if (p.message.isDefined) p.message.get else ""
       var place = if (p.place.isDefined) p.place.get else ""
-
       var result = Await.result(pipeline(Put(Constants.serverURL + "/user/" + userId + "/albums/photo", HttpEntity(MediaTypes.`application/json`, s"""{"userId": "$userId", "albumId" : "$albumId", "place": "$place","photoId": "$photoId", "src": "$src", "message": "$message", "noStory": $noStory}"""))), timeout.duration)
       notifyToFrnds(Notification.PhotoType, p.photoId, aesRes.secretKey)
       result
