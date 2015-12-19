@@ -1,8 +1,9 @@
 # Secure Facebook #
+Secure Facebook is an minimal implementation of the social network website Facebook, only more secure!!
 
 ## Description ##
 
-Secure Facebook is an minimal implementation of the social network website Facebook, only more secure thanks to its public key encryption scheme! The robust akka actor model message passing powers the core of the simulator and the incredibly smart Spray Can provides the restful APIs.
+RSA public private scheme is used to authenticate the user and AES encryption is used to encrypt the user content (profile, posts, albums, photos and other such meta data) on the server. The robust akka actor model message passing powers the core of the simulator and the incredibly smart Spray Can provides the restful APIs.
 
 ## List of APIs ##
 * Home Page
