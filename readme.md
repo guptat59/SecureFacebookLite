@@ -13,7 +13,7 @@ RSA public private scheme is used to authenticate the user and AES encryption is
 * Picture and Albums.
 
 ## Owners ##
-* [Tarun Gupta Akirala](https://github.com/guptat59) 
+* [Tarun Gupta Akirala](https://github.com/takirala/) 
 * [Rakesh Dammalapati ](https://bitbucket.org/rakeshdrk/)
 
 
