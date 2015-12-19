@@ -12,7 +12,7 @@ Secure Facebook is an minimal implementation of the social network website Faceb
 * Picture and Albums.
 
 ## Owners ##
-* [Tarun Gupta Akirala](https://bitbucket.org/tarun_gupta_akirala/) 
+* [Tarun Gupta Akirala](https://github.com/guptat59) 
 * [Rakesh Dammalapati ](https://bitbucket.org/rakeshdrk/)
 
 
